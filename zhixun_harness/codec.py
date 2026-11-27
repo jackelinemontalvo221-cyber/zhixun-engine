@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Iterable, Mapping, Sequence
@@ -34,7 +35,18 @@ def _fail(message: str, **detail):
     raise StageDataError(message, **detail)
 
 
-def parse_jsonl(raw: bytes, name: str, max_rows: int = DEFAULT_MAX_ROWS) -> list[dict]:
+class TrustedStageFiles(dict):
+    """Stage files serialised by our own round source from rows it already parsed.
+
+    Their lines are produced by ``json.dumps`` of plain dicts, so the strict parser's
+    duplicate-key and depth checks cannot fail; skipping them saves seconds per
+    round on the large C projection.  Every row check after parsing still runs.
+    """
+
+    trusted = True
+
+
+def parse_jsonl(raw: bytes, name: str, max_rows: int = DEFAULT_MAX_ROWS, trusted: bool = False) -> list[dict]:
     if len(raw) > MAX_FILE_BYTES:
         _fail(f"{name} exceeds {MAX_FILE_BYTES} bytes", file=name)
     try:
@@ -46,8 +58,8 @@ def parse_jsonl(raw: bytes, name: str, max_rows: int = DEFAULT_MAX_ROWS) -> list
         if not line.strip():
             continue
         try:
-            row = strict_json_loads(line)
-        except FatalContractError as exc:
+            row = json.loads(line) if trusted else strict_json_loads(line)
+        except (FatalContractError, ValueError) as exc:
             _fail(f"{name} line {number}: {exc}", file=name, line=number)
         if not isinstance(row, dict):
             _fail(f"{name} line {number}: row must be an object", file=name, line=number)
@@ -73,6 +85,16 @@ def flatten_inputs(inputs: Mapping, number: int = 0) -> dict[str, float]:
     """Flatten scalar and array inputs into stable dotted/indexed paths."""
     if not isinstance(inputs, dict) or not inputs:
         _fail("inputs must be a non-empty object", line=number)
+    # Fast path: an already flat row (the round source flattens once, the codec
+    # then sees flat rows).  Same checks, no recursion.
+    if len(inputs) <= 4096 and all(type(value) in (int, float) for value in inputs.values()):
+        flat = {str(key): float(value) for key, value in sorted(inputs.items())}
+        if not all(math.isfinite(value) for value in flat.values()):
+            bad = next(key for key, value in flat.items() if not math.isfinite(value))
+            _fail(f"feature {bad!r} must be finite", line=number)
+        if len(flat) != len(inputs):
+            _fail("ambiguous flattened feature path", line=number)
+        return flat
     flat: dict[str, float] = {}
 
     def walk(prefix: str, value, depth: int):
@@ -134,14 +156,14 @@ def _forbidden(profile: StageProfile) -> set[str]:
     return {normalise_key(item) for item in (*DEFAULT_FORBIDDEN, *profile.forbidden_input_fields)}
 
 
-def _check_forbidden(row: Mapping, keys: Iterable[str], number: int, forbidden: set[str]):
+def _check_forbidden(row: Mapping, keys: Iterable[str], number: int, forbidden: set[str], flat=None):
     inputs = row.get("inputs")
     if not isinstance(inputs, dict):
         return
     candidates = set()
     for key in inputs:
         candidates.add(str(key))
-    for key in flatten_inputs(inputs, number):
+    for key in (flat if flat is not None else flatten_inputs(inputs, number)):
         candidates.add(key)
         candidates.add(key.split("[")[0])
         candidates.add(key.split(".")[0])
@@ -191,7 +213,8 @@ def normalize_stage(raw: Mapping[str, bytes], profile: StageProfile | None = Non
     limits = profile.limits or {}
     max_rows = int(limits.get("max_rows", DEFAULT_MAX_ROWS))
 
-    feature_rows = parse_jsonl(raw[feature_uri], feature_uri, max_rows)
+    trusted = bool(getattr(raw, "trusted", False))
+    feature_rows = parse_jsonl(raw[feature_uri], feature_uri, max_rows, trusted=trusted)
     if not feature_rows:
         _fail("features file has no rows")
 
@@ -200,6 +223,7 @@ def normalize_stage(raw: Mapping[str, bytes], profile: StageProfile | None = Non
     feature_keys = _feature_keys(feature_rows, profile)
     forbidden = _forbidden(profile)
     features = []
+    checked_layouts: set = set()
     for number, row in enumerate(feature_rows, 1):
         sample_id = row.get("id")
         if not isinstance(sample_id, str) or not sample_id:
@@ -207,8 +231,19 @@ def normalize_stage(raw: Mapping[str, bytes], profile: StageProfile | None = Non
         if sample_id in seen:
             _fail("duplicate id", line=number, field="id", id=sample_id)
         seen.add(sample_id)
-        _check_forbidden(row, feature_keys, number, forbidden)
-        features.append(_values(row, feature_keys, number))
+        # Flatten once per row (it was flattened twice), and check forbidden names
+        # once per distinct key layout: the check depends only on the key names.
+        # On the platform's C projection (136k rows) ingestion was ~2/3 of a round.
+        inputs = row.get("inputs")
+        flat = flatten_inputs(inputs, number)
+        layout = (tuple(inputs) if isinstance(inputs, dict) else (), tuple(flat))
+        if layout not in checked_layouts:
+            _check_forbidden(row, feature_keys, number, forbidden, flat=flat)
+            checked_layouts.add(layout)
+        try:
+            features.append([flat[key] for key in feature_keys])
+        except KeyError as exc:
+            _fail(f"missing feature {exc.args[0]!r}", line=number)
         ids.append(sample_id)
 
     targets = None
@@ -220,7 +255,7 @@ def normalize_stage(raw: Mapping[str, bytes], profile: StageProfile | None = Non
     if profile.label_status == "hidden" and label_bytes is not None:
         _fail(f"{label_uri} must not be present when label_status=hidden")
     if label_bytes is not None:
-        label_rows = parse_jsonl(label_bytes, label_uri, max_rows)
+        label_rows = parse_jsonl(label_bytes, label_uri, max_rows, trusted=trusted)
         target_values = []
         group_values = []
         label_ids = set()

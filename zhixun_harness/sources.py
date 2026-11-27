@@ -11,7 +11,7 @@ import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Protocol
 
-from .codec import DEFAULT_FORBIDDEN, MAX_FILE_BYTES, flatten_inputs, parse_jsonl
+from .codec import DEFAULT_FORBIDDEN, MAX_FILE_BYTES, TrustedStageFiles, flatten_inputs, parse_jsonl
 from .contracts import StageDescriptor, StageProfile, strict_json_loads
 from .errors import ConfigError, StageDataError
 
@@ -298,7 +298,7 @@ class WorkspaceV2Source:
                 raise StageDataError(f"{prefix} row {number} is not a valid sample")
             feature_lines.append(json.dumps(
                 {"id": row["id"], "inputs": flatten_inputs(row["inputs"], number)},
-                ensure_ascii=False,
+                ensure_ascii=False, check_circular=False, separators=(",", ":"),
             ))
             if "answer" in row:
                 label_lines.append(json.dumps(
@@ -307,10 +307,10 @@ class WorkspaceV2Source:
                 ))
             if len(feature_lines) > max_rows:
                 raise StageDataError(f"{prefix} exceeds max_rows={max_rows}")
-        files = {
+        files = TrustedStageFiles({
             "profile.json": json.dumps(self.profile.to_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8"),
             self.profile.feature_uri: ("\n".join(feature_lines) + "\n").encode("utf-8"),
-        }
+        })
         if label_lines:
             files[self.profile.label_uri] = ("\n".join(label_lines) + "\n").encode("utf-8")
         return files

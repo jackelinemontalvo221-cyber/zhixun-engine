@@ -70,17 +70,27 @@ def canonical_sha256(bundle: StageBundle) -> str:
 
     digest = hashlib.sha256()
     digest.update(metadata)
+    # Same byte stream as hashing value by value, but the doubles of a row are
+    # packed by numpy in one go (the per-value loop was ~10 s on the C projection).
+    if not np.isfinite(features).all():
+        raise FatalContractError("canonical hash received a non-finite number")
+    packed = np.where(features == 0.0, 0.0, features).astype(">f8")
+    target_bytes = None
+    if targets is not None:
+        target_values = np.asarray(targets, dtype=np.float64).reshape(-1)
+        if not np.isfinite(target_values).all():
+            raise FatalContractError("canonical hash received a non-finite number")
+        target_bytes = np.where(target_values == 0.0, 0.0, target_values).astype(">f8")
     order = sorted(range(bundle.sample_count), key=lambda index: bundle.ids[index].encode("utf-8"))
     for index in order:
         digest.update(bundle.ids[index].encode("utf-8"))
         digest.update(b"\x1f")
-        for value in features[index]:
-            digest.update(struct.pack(">d", _normalise(value)))
+        digest.update(packed[index].tobytes())
         digest.update(b"\x1f")
-        if targets is None:
+        if target_bytes is None:
             digest.update(b"-")
         else:
-            digest.update(struct.pack(">d", _normalise(targets[index])))
+            digest.update(target_bytes[index:index + 1].tobytes())
         digest.update(b"\x1f")
         digest.update(bundle.group_ids[index].encode("utf-8"))
         digest.update(b"\x1e")

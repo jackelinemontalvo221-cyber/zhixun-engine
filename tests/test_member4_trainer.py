@@ -341,7 +341,7 @@ def test_policy_hints_are_task_specific():
     trainer = CandidateTrainer()
     assert trainer.policy_hints("A")["metric_name"] == "macro_f1"
     assert trainer.policy_hints("B")["window_ratio"] == 0.3
-    assert trainer.policy_hints("C")["max_epochs"] == 2
+    assert trainer.policy_hints("C")["max_epochs"] == 10
 
 
 def test_strategy_history_can_promote_optional_replay_candidate():

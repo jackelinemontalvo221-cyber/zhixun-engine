@@ -40,14 +40,17 @@ POLICIES = {
         "metric_direction": "minimize",
         "allowed_actions": ("no_update", "adaptive_update"),
         "max_candidates": 3,
-        # Re-measured on the integrated code (member2.compare, C-MAPSS, 3 seeds x 10
-        # rounds): caps of 2 / 5 / 15 epochs gave RMSE 65.63 / 65.62 / 65.73 with the
-        # full search, so the cheaper cap stays.
-        "max_epochs": 2,
+        # Platform trial 11/27: the C training projection is the same in every round,
+        # so "recent 20% per unit" is just the near-failure tail of each engine.  On the
+        # public package with half the validation units held out (3 splits), recent-20%
+        # made held-out RMSE worse (+16 after 1 epoch) while full data with per-epoch
+        # selection up to 10 epochs improved it (-1.2 to -1.7); further rounds added
+        # little.  Full data comes first; the recent window stays as a cheap alternative.
+        "max_epochs": 10,
         "window_ratio": 0.2,
         "guidance": (
-            "优先比较最近20%数据1-2个epoch与全量1个epoch；"
-            "RMSE没有改善时选择no_update。"
+            "优先全量数据续训最多10个epoch（逐epoch按验证集选最佳），并与最近20%数据1-2个epoch比较；"
+            "RMSE没有改善或没有新数据时选择no_update。"
         ),
     },
 }
@@ -133,13 +136,14 @@ def candidate_plans(
     elif key == "C":
         window = 0.2
         plans = [
+            # epoch 1 of full-selected is also evaluated, so it covers the old full-short
+            {"name": "full-selected", "action": "retrain_full", "max_epochs": min(10, max_epochs)},
             {
                 "name": "recent-selected",
                 "action": "retrain_recent",
                 "window_ratio": window,
                 "max_epochs": min(2, max_epochs),
             },
-            {"name": "full-short", "action": "retrain_full", "max_epochs": min(1, max_epochs)},
         ]
         if replay_available:
             plans.append({
