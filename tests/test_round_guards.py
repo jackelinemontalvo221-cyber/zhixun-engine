@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -342,3 +343,45 @@ def test_state_budget_prunes_only_audit_files(tmp_path):
     assert all("members/evaluation/" in item for item in removed)
     # the newest audits survive
     assert (slot / "members" / "evaluation" / "metrics-069.json").is_file()
+
+
+def test_wall_clock_counts_data_loading(tmp_path, monkeypatch):
+    """The wall budget starts at train(), not when the context is built after loading data."""
+    import zhixun_harness.round_runner as runner_module
+
+    seen = {}
+    original_context = runner_module.RoundContext
+    original_source = runner_module.WorkspaceV2Source
+
+    def slow_source(*args, **kwargs):
+        time.sleep(0.3)                     # stands in for a minute of loading C
+        return original_source(*args, **kwargs)
+
+    def recording(*args, **kwargs):
+        context = original_context(*args, **kwargs)
+        seen["started"], seen["built"] = context.started_monotonic, time.monotonic()
+        return context
+
+    monkeypatch.setattr(runner_module, "WorkspaceV2Source", slow_source)
+    monkeypatch.setattr(runner_module, "RoundContext", recording)
+    rnd = _make_round(tmp_path, monkeypatch, wall_seconds=None)
+    run_round(rnd, pipeline=_Pipeline("no_update"), evaluator=_Evaluator(),
+              config=load_config("configs/harness.full.json"))
+    assert seen["built"] - seen["started"] >= 0.3
+
+
+def test_row_keys_are_compact(tmp_path):
+    import numpy as np
+    from types import SimpleNamespace
+    from zhixun_harness.round_state import RoundState, track_rows
+
+    bundle = SimpleNamespace(ids=("a", "b"), features=np.array([[1.0, 2.0], [3.0, 4.0]]),
+                             targets=np.array([1.0, 0.0]))
+    state = RoundState(tmp_path)
+    assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [True, True]
+    stored = json.loads((tmp_path / "rows.json").read_text())
+    assert all(len(key) == 16 for key in stored["train"])
+    assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [False, False]
+    changed = SimpleNamespace(ids=("a", "b"), features=np.array([[1.0, 2.0], [3.0, 5.0]]),
+                              targets=np.array([1.0, 0.0]))
+    assert track_rows(state, {"train": changed})["train"].new_mask.tolist() == [False, True]

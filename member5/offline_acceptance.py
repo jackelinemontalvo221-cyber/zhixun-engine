@@ -110,6 +110,13 @@ def evaluate_offline_acceptance(
             else "pass"
         ),
         "strict_evidence": strict_evidence,
+        # "status: pass" without --strict-evidence only covers the offline runtime.
+        "scope": "runtime+evidence" if strict_evidence else "runtime_only",
+        "note": (
+            None if strict_evidence or not rows or all(row["evidence_status"] == "pass" for row in rows)
+            else "status covers the offline runtime only; public experiment evidence is not verified "
+                 "(run with --strict-evidence)"
+        ),
         "checks": checks,
         "failures": failures,
         "report": report,

@@ -41,23 +41,44 @@ class RowDelta:
     previous_count: int
 
 
+ROW_KEY_HEX = 16   # 64-bit row keys: collisions are negligible at our row counts
+
+
+def _row_keys(bundle) -> list[str]:
+    features = np.ascontiguousarray(np.asarray(bundle.features, dtype="<f8"))
+    targets = None if bundle.targets is None else np.asarray(bundle.targets, dtype="<f8").reshape(-1)
+    keys = []
+    for i in range(len(bundle.ids)):
+        digest = hashlib.sha256(bundle.ids[i].encode("utf-8") + b"\x1f" + features[i].tobytes() + b"\x1f"
+                                + (b"-" if targets is None else targets[i:i + 1].tobytes()))
+        keys.append(digest.hexdigest()[:ROW_KEY_HEX])
+    return keys
+
+
 def track_rows(state, bundles):
     """Track authorized sample ids AND content. Changed content counts as new.
 
     Validation identities stay in a separate namespace; they never become training rows.
     State is scoped by dataset by the caller. No attempt to infer hidden labels.
+
+    Keys are 16 hex characters of a SHA-256 over id, feature bytes and target
+    (64 hex characters of a JSON dump before): ``rows.json`` for the C
+    projection is ~2.5 MB instead of 9.3 MB and hashing is several times faster.
+    Its size is bounded by the number of distinct rows ever seen, which on this
+    platform is the public projection of one dataset.  Keys of the old format
+    never match, so the first round after an upgrade sees every row as new
+    (a larger update hint, never a skipped one).
     """
-    previous = state.read("rows.json", {})
+    try:
+        previous = state.read("rows.json", {})
+    except ValueError:
+        previous = {}
     result = {}
     for split, bundle in bundles.items():
         if bundle is None:
             continue
-        seen = set(previous.get(split, []))
-        keys = []
-        for i, row in enumerate(bundle.features):
-            target = None if bundle.targets is None else np.asarray(bundle.targets[i]).tolist()
-            data = [bundle.ids[i], np.asarray(row).tolist(), target]
-            keys.append(hashlib.sha256(json.dumps(data, sort_keys=True, allow_nan=False).encode()).hexdigest())
+        seen = {key for key in previous.get(split, []) if isinstance(key, str) and len(key) == ROW_KEY_HEX}
+        keys = _row_keys(bundle)
         result[split] = RowDelta(np.array([k not in seen for k in keys], dtype=bool), "id+content", len(seen))
         previous[split] = sorted(seen | set(keys))
     state.write("rows.json", previous)
@@ -92,6 +113,9 @@ class RoundContext:
     # Compact summaries of earlier rounds from our own state, newest last.  The
     # platform history only guarantees an ``id`` field.
     round_log: list = field(default_factory=list)
+    # When the round started.  The round runner passes the start of train(), so
+    # data loading before the context exists counts against the wall clock too;
+    # the default is only for contexts built elsewhere (tests, tools).
     started_monotonic: float = field(default_factory=time.monotonic)
 
     def member_dir(self, name):

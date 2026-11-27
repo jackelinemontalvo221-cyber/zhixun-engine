@@ -105,6 +105,7 @@ PRUNABLE_STATE = (
     "members/training/audit.jsonl",
     "members/training/latest.json",
     "members/training/replay.npz",
+    "rows.json",        # last resort: losing it only makes every row look new once
 )
 STATE_FILE_BUDGET = MAX_UPLOAD_FILES - 4
 
@@ -407,6 +408,7 @@ class _Round:
         self.active = None
         self.gateway = None
         self.metric_contract = {}
+        self.started = time.monotonic()
 
 
 def run_round(rnd, pipeline=None, evaluator=None, config: HarnessConfig | None = None) -> dict:
@@ -517,6 +519,9 @@ def _run(run, pipeline, evaluator) -> dict:
                                wall_seconds=getattr(rnd, "wall_seconds", None),
                                limits=dict(getattr(rnd, "limits", {}) or {}),
                                lineage=lineage,
+                               # from the start of train(), so loading and parsing the
+                               # data (about a minute on C) counts against the wall clock
+                               started_monotonic=run.started,
                                round_log=list(state.read("round-log.json", []) or [])[-8:])
         run.context = context
         pipeline.bind_round(context)
