@@ -122,11 +122,71 @@ class LocalManifestSource:
             handle.write(line + "\n")
 
 
+# Metrics our evaluators compute, and their mathematically fixed direction.
+KNOWN_METRICS = {"macro_f1": "maximize", "accuracy": "maximize", "balanced_accuracy": "maximize",
+                 "rmse": "minimize", "mae": "minimize"}
+_METRIC_ALIASES = {"macrof1": "macro_f1", "f1macro": "macro_f1", "f1": "macro_f1", "macro_f1_score": "macro_f1",
+                   "acc": "accuracy", "rootmeansquarederror": "rmse", "meanabsoluteerror": "mae"}
+
+
+def _metric_key(value) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("key") or value.get("id") or value.get("metric")
+    if isinstance(value, (list, tuple)) and value:
+        return _metric_key(value[0])
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().lower().replace("-", "_").replace(" ", "_")
+    if text in KNOWN_METRICS:
+        return text
+    return _METRIC_ALIASES.get(text.replace("_", ""), text)
+
+
+def _direction_word(value) -> str | None:
+    if isinstance(value, bool):
+        return None
+    text = str(value).strip().lower()
+    if any(word in text for word in ("min", "low", "less", "small", "decreas", "越低", "越小")):
+        return "minimize"
+    if any(word in text for word in ("max", "high", "great", "larg", "increas", "越高", "越大")):
+        return "maximize"
+    return None
+
+
+def normalize_metric(task: Mapping, task_type: str) -> tuple[str, str]:
+    """(metric_name, direction) from a task contract, robust to its wording.
+
+    The platform contract is not documented field by field: the metric may be a
+    string, an object or a list, and the direction may say ``lower_is_better`` or
+    ``min``.  A metric we compute keeps its fixed direction (RMSE is always
+    minimised); an unknown metric falls back to the task default.
+    """
+    default = "macro_f1" if task_type == "classification" else "rmse"
+    name = None
+    for key in ("metric_name", "metric", "primary_metric", "metrics"):
+        name = _metric_key(task.get(key))
+        if name:
+            break
+    if name not in KNOWN_METRICS:
+        name = default
+    if name in KNOWN_METRICS:
+        return name, KNOWN_METRICS[name]
+    direction = None
+    metric = task.get("metric") if isinstance(task.get("metric"), dict) else {}
+    for value in (task.get("direction"), task.get("metric_direction"), task.get("goal"), metric.get("direction")):
+        direction = direction or (_direction_word(value) if value is not None else None)
+    return name, direction or ("maximize" if task_type == "classification" else "minimize")
+
+
 class WorkspaceV2Source:
     """Adapt one official ``Round`` frame into the internal stage contract."""
 
-    def __init__(self, rnd):
+    def __init__(self, rnd, class_order=None):
         self.rnd = rnd
+        # The parent checkpoint's class order.  The task contract may list the same
+        # classes in another order (the platform's A contract does); label indices
+        # must follow the checkpoint, otherwise every model looks mismatched.
+        self.class_order = list(class_order) if class_order else None
         self._descriptor = StageDescriptor(
             task_id=str(rnd.dataset_key),
             stage_id=f"round-{int(rnd.round_index):04d}",
@@ -157,6 +217,9 @@ class WorkspaceV2Source:
         classes = task.get("classes")
         if classes is None and task_type == "classification":
             classes = sorted({row.get("answer") for row in self._train_rows if isinstance(row.get("answer"), str)})
+        if (task_type == "classification" and classes and self.class_order
+                and len(self.class_order) == len(classes) and set(self.class_order) == set(classes)):
+            classes = list(self.class_order)
         # Always materialise an explicit ``group`` column in the label
         # projection.  The task contract wins; otherwise use the dataset's
         # documented provenance field (``meta.bearing`` etc.).
@@ -263,15 +326,19 @@ class WorkspaceV2Source:
 
     @property
     def metric_name(self) -> str:
-        task = self._contract()
-        return str(task.get("metric_name") or task.get("metric") or
-                   ("macro_f1" if self.profile.task_type == "classification" else "rmse"))
+        return normalize_metric(self._contract(), self.profile.task_type)[0]
 
     @property
     def metric_direction(self) -> str:
+        return normalize_metric(self._contract(), self.profile.task_type)[1]
+
+    @property
+    def metric_contract(self) -> dict:
+        """The raw metric fields of the task contract, small, for the round evidence."""
         task = self._contract()
-        return str(task.get("direction") or task.get("metric_direction") or
-                   ("maximize" if self.profile.task_type == "classification" else "minimize"))
+        keys = ("metric", "metric_name", "metrics", "primary_metric", "direction", "metric_direction",
+                "goal", "higher_is_better", "lower_is_better", "greater_is_better")
+        return {key: str(task[key])[:200] for key in keys if key in task}
 
 
 class PlatformStageSource:

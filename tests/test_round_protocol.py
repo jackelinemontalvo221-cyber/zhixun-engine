@@ -452,6 +452,41 @@ def test_rollback_needs_the_target_in_our_lineage(tmp_path, monkeypatch):
     assert host.record["selected_artifact_id"] in {"parent-1", "model-2"}
 
 
+def test_contract_class_order_follows_the_parent_checkpoint(tmp_path, monkeypatch):
+    """The platform's A contract lists the classes in another order than the checkpoint."""
+    monkeypatch.setenv("CONTEST_WORK", str(tmp_path / "work"))
+    start = build_start(1)
+    start["task_contract"]["classes"] = sorted(start["task_contract"]["classes"])
+    start["task_contract"]["metric"] = {"name": "macro_f1", "direction": "higher_is_better"}
+    answer = json.dumps({"action": "no_update", "params": {}, "rationale": "保持"}, ensure_ascii=False)
+    host = WorkspaceHost(start, model_content=answer)
+    writer = MemoryWriter(host)
+    rnd = Round(start, writer.reader, writer)
+    rnd.parent.root = PACKAGE
+    result = run_round(rnd, config=load_config("configs/harness.full.json"))
+    assert result["final_action"] != "failed", result.get("error")
+    assert abs(result["summary"]["parent_metrics"]["macro_f1"] - 0.71403) < 1e-4
+    assert host.record["configuration"]["evidence"]["gate_metric"]["direction"] == "maximize"
+
+
+@pytest.mark.parametrize("key", ["B", "C"])
+def test_regression_contract_wording_does_not_break_training(key, tmp_path, monkeypatch):
+    monkeypatch.setenv("CONTEST_WORK", str(tmp_path / "work"))
+    start = build_start(1, key)
+    start["task_contract"]["metric"] = "RMSE"
+    start["task_contract"]["direction"] = "lower_is_better"
+    answer = json.dumps({"action": "adaptive_update",
+                         "params": {"max_candidates": 1, "max_epochs": 1, "seed": 42},
+                         "rationale": "续训"}, ensure_ascii=False)
+    host = WorkspaceHost(start, model_content=answer)
+    writer = MemoryWriter(host)
+    rnd = Round(start, writer.reader, writer)
+    rnd.parent.root = PACKAGES[key]
+    result = run_round(rnd, config=load_config("configs/harness.full.json"))
+    assert result["final_action"] in {"promote", "keep", "reject"}, result.get("error")
+    assert result["evaluation"] is not None
+
+
 @pytest.mark.skipif(not PACKAGE.is_dir(), reason="reference package is not present")
 @pytest.mark.parametrize("round_index,expected,candidates", [(1, "parent-1", 0), (2, "model-2", 1)])
 def test_train_round_speaks_workspace_v2(round_index, expected, candidates, tmp_path):

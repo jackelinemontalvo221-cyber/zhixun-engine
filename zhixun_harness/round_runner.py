@@ -406,6 +406,7 @@ class _Round:
         self.current = {}
         self.active = None
         self.gateway = None
+        self.metric_contract = {}
 
 
 def run_round(rnd, pipeline=None, evaluator=None, config: HarnessConfig | None = None) -> dict:
@@ -429,10 +430,33 @@ def run_round(rnd, pipeline=None, evaluator=None, config: HarnessConfig | None =
         return _fallback_finish(run, exc)
 
 
+def _parent_classes(rnd):
+    """Class order stored in the parent checkpoint (None when it cannot be read).
+
+    Reading the parent verifies its digest; a mismatch is fatal and propagates.
+    """
+    descriptor = getattr(getattr(rnd, "parent", None), "descriptor", None)
+    paths = descriptor.get("checkpoint_paths") if isinstance(descriptor, dict) else None
+    if not isinstance(paths, list) or len(paths) != 1:
+        return None
+    try:
+        path = rnd.parent.path(paths[0])
+    except Exception as exc:
+        if str(getattr(exc, "code", "")) in FATAL_HARNESS_CODES:
+            raise
+        return None   # e.g. a fake pipeline with no mounted parent; later steps decide
+    try:
+        classes = import_baselines().model.Model.load(path).meta.get("classes")
+    except Exception:
+        return None
+    return list(classes) if classes else None
+
+
 def _run(run, pipeline, evaluator) -> dict:
     rnd, config = run.rnd, run.config
     cpu_started = time.process_time()
-    source = WorkspaceV2Source(rnd)
+    source = WorkspaceV2Source(rnd, class_order=_parent_classes(rnd))
+    run.metric_contract = source.metric_contract
     descriptor = source.next()
     if descriptor is None:
         raise StageDataError("the round source produced no stage")
@@ -622,6 +646,9 @@ def _run(run, pipeline, evaluator) -> dict:
     summary = _round_summary(rnd, diagnosis, decision, final_action, current, evaluation, rollback,
                              candidate, budget)
     summary["selected_artifact_id"] = selected_artifact_id
+    summary["gate_metric"] = {"name": (context.gate if context else config.gate).get("metric_name"),
+                              "direction": (context.gate if context else config.gate).get("direction"),
+                              "contract": getattr(run, "metric_contract", {})}
     if trial_note is not None:
         summary["trial"] = trial_note
     if submitted is not None:
@@ -775,6 +802,7 @@ def _fallback_finish(run, exc) -> dict:
     summary = {
         "round": int(rnd.round_index), "dataset": str(rnd.dataset_key), "final_action": "failed",
         "failed_stage": run.stage, "error": error_text, "parent_artifact_id": str(rnd.parent.artifact_id),
+        "contract_metric": getattr(run, "metric_contract", {}),
         "action": getattr(run.decision, "action", None),
         "drift_type": getattr(run.diagnosis, "drift_type", None),
         "parent_metrics": {k: round(float(v), 6) for k, v in dict(run.current or {}).items()},

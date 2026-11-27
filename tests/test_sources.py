@@ -66,3 +66,23 @@ def test_symlink_in_stage_is_rejected(tmp_path):
     descriptor = source.next()
     with pytest.raises(StageDataError):
         source.read(descriptor)
+
+
+@pytest.mark.parametrize("task,expected", [
+    ({}, ("rmse", "minimize")),
+    ({"metric": "RMSE", "direction": "lower_is_better"}, ("rmse", "minimize")),
+    ({"metric": {"name": "rmse", "direction": "lower"}}, ("rmse", "minimize")),
+    ({"metric_name": "rmse", "direction": "max"}, ("rmse", "minimize")),     # RMSE is never maximised
+    ({"metrics": ["MAE", "RMSE"]}, ("mae", "minimize")),
+    ({"metric": "nasa_score", "direction": "越低越好"}, ("rmse", "minimize")),  # not computable -> default
+])
+def test_metric_contract_is_normalised_for_regression(task, expected):
+    from zhixun_harness.sources import normalize_metric
+    assert normalize_metric(task, "regression") == expected
+
+
+@pytest.mark.parametrize("task", [{"metric": "Macro-F1", "direction": "higher_is_better"},
+                                  {"metric": {"name": "macro_f1"}}, {"direction": "desc"}, {}])
+def test_metric_contract_is_normalised_for_classification(task):
+    from zhixun_harness.sources import normalize_metric
+    assert normalize_metric(task, "classification") == ("macro_f1", "maximize")
