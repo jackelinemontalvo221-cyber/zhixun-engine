@@ -1,0 +1,32 @@
+{
+  "schema_version": "harness-config.v1",
+  "pipeline": {
+    "diagnose": "member2.drift:DriftDiagnoser",
+    "decide": "member2.rules:RuleDecider"
+  },
+  "predictor": "official",
+  "gate": {
+    "metric_name": "macro_f1",
+    "direction": "maximize",
+    "min_delta": 0.0,
+    "max_regression": 0.02,
+    "min_samples": 2
+  },
+  "budget": {
+    "cpu_seconds": 3600,
+    "tokens": 0,
+    "label_quota": 0,
+    "max_stages": 60,
+    "max_candidates_per_stage": 2
+  },
+  "retry": {
+    "read_attempts": 3,
+    "backoff_seconds": 0.5,
+    "on_stage_error": "continue"
+  },
+  "artifact": {
+    "embed_arrays": false,
+    "cleanup_tmp_on_start": false
+  },
+  "initial_checkpoint": null
+}

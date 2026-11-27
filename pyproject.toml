@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zhixun-harness"
+version = "0.1.0"
+description = "Member 1 control plane for the Zhixun industrial model self-evolution contest"
+requires-python = ">=3.10"
+dependencies = ["numpy==1.26.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+live = ["httpx>=0.28.1", "pytrio>=0.2.10"]
+
+[tool.setuptools]
+py-modules = ["contest_submission"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zhixun_harness*", "member2*", "member3*", "member4*", "member5*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["cpu-*", ".venv", "data", "artifacts"]

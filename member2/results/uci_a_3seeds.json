@@ -1,0 +1,188 @@
+{
+ "seeds": [
+  0,
+  1,
+  2
+ ],
+ "summary": [
+  {
+   "policy": "static",
+   "mean_f1": 0.4332,
+   "worst_f1": 0.1906,
+   "mean_G": 0.0,
+   "updates": 0,
+   "epochs": 0,
+   "diag_s": 0.0,
+   "mean_f1_by_seed": [
+    0.4369,
+    0.429,
+    0.4337
+   ]
+  },
+  {
+   "policy": "always",
+   "mean_f1": 0.9522,
+   "worst_f1": 0.8503,
+   "mean_G": 1.0,
+   "updates": 9,
+   "epochs": 180,
+   "diag_s": 0.0,
+   "mean_f1_by_seed": [
+    0.9752,
+    0.9498,
+    0.9315
+   ]
+  },
+  {
+   "policy": "member2",
+   "mean_f1": 0.9521,
+   "worst_f1": 0.8559,
+   "mean_G": 0.9957,
+   "updates": 9,
+   "epochs": 165,
+   "diag_s": 0.1207,
+   "mean_f1_by_seed": [
+    0.9753,
+    0.9482,
+    0.9328
+   ]
+  }
+ ],
+ "member2_rounds_seed0": [
+  {
+   "round": 1,
+   "batch": 2,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9336,
+   "diagnose_cpu_s": 0.032,
+   "severity": "severe",
+   "drift_type": "concept",
+   "top": [
+    "传感器9·衰减EMA0.001",
+    "传感器10·衰减EMA0.01"
+   ]
+  },
+  {
+   "round": 2,
+   "batch": 3,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.997,
+   "diagnose_cpu_s": 0.036,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器10·衰减EMA0.001",
+    "传感器10·ΔR稳态"
+   ]
+  },
+  {
+   "round": 3,
+   "batch": 4,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9794,
+   "diagnose_cpu_s": 0.037,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器13·上升EMA0.01",
+    "传感器14·上升EMA0.01"
+   ]
+  },
+  {
+   "round": 4,
+   "batch": 5,
+   "action": "finetune",
+   "epochs": 5,
+   "promoted": true,
+   "hidden_f1": 0.9738,
+   "diagnose_cpu_s": 0.061,
+   "severity": "none",
+   "drift_type": "covariate",
+   "top": [
+    "传感器13·上升EMA0.1",
+    "传感器14·上升EMA0.1"
+   ]
+  },
+  {
+   "round": 5,
+   "batch": 6,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9895,
+   "diagnose_cpu_s": 0.056,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器6·衰减EMA0.1",
+    "传感器5·衰减EMA0.1"
+   ]
+  },
+  {
+   "round": 6,
+   "batch": 7,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9983,
+   "diagnose_cpu_s": 0.088,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器5·衰减EMA0.1",
+    "传感器6·衰减EMA0.1"
+   ]
+  },
+  {
+   "round": 7,
+   "batch": 8,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9268,
+   "diagnose_cpu_s": 0.1,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器1·衰减EMA0.001",
+    "传感器1·衰减EMA0.01"
+   ]
+  },
+  {
+   "round": 8,
+   "batch": 9,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 1.0,
+   "diagnose_cpu_s": 0.114,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器3·上升EMA0.001",
+    "传感器4·上升EMA0.001"
+   ]
+  },
+  {
+   "round": 9,
+   "batch": 10,
+   "action": "retrain_full",
+   "epochs": 20,
+   "promoted": true,
+   "hidden_f1": 0.9792,
+   "diagnose_cpu_s": 0.111,
+   "severity": "severe",
+   "drift_type": "mixed",
+   "top": [
+    "传感器14·上升EMA0.1",
+    "传感器13·衰减EMA0.1"
+   ]
+  }
+ ]
+}

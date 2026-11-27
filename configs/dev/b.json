@@ -1,0 +1,10 @@
+{
+  "schema_version": "dev-profile.v1",
+  "task_id": "B",
+  "package_dir": "cpu-b-rul-20261110-v1",
+  "profile": "baselines/configs/B.json",
+  "initial_checkpoint": "checkpoint.npz",
+  "feature_count": 34,
+  "group_field": "meta.bearing",
+  "forbidden_input_fields": ["bearing", "snapshot", "totalsnapshots", "rul", "remainingusefullife"]
+}

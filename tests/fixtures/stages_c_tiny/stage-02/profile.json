@@ -1,0 +1,47 @@
+{
+  "classes": [],
+  "feature_count": 24,
+  "feature_paths": [
+    "sensors[0]",
+    "sensors[10]",
+    "sensors[11]",
+    "sensors[12]",
+    "sensors[13]",
+    "sensors[14]",
+    "sensors[15]",
+    "sensors[16]",
+    "sensors[17]",
+    "sensors[18]",
+    "sensors[19]",
+    "sensors[1]",
+    "sensors[20]",
+    "sensors[2]",
+    "sensors[3]",
+    "sensors[4]",
+    "sensors[5]",
+    "sensors[6]",
+    "sensors[7]",
+    "sensors[8]",
+    "sensors[9]",
+    "settings[0]",
+    "settings[1]",
+    "settings[2]"
+  ],
+  "feature_schema_id": "cpu-c-guide-20261110-v1.features24.v1",
+  "feature_uri": "features.jsonl",
+  "forbidden_input_fields": [
+    "id",
+    "source_batch",
+    "source_index"
+  ],
+  "group_field": "group",
+  "group_split": "allow_overlap",
+  "label_status": "available",
+  "label_uri": "labels.jsonl",
+  "limits": {
+    "max_rows": 200000
+  },
+  "schema_version": "stage-profile.v1",
+  "task_id": "C",
+  "task_type": "regression"
+}

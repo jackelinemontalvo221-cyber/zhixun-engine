@@ -1,0 +1,39 @@
+{
+  "schema_version": "harness-config.v1",
+  "pipeline": {
+    "diagnose": "member2.drift:DriftDiagnoser",
+    "decide": "member3.decider:LLMDecider",
+    "train_candidate": "member4.trainer:CandidateTrainer",
+    "evaluate_and_commit": "member5.evaluator:EvaluationGate"
+  },
+  "evaluator": "official",
+  "predictor": "official",
+  "gate": {
+    "metric_name": "macro_f1",
+    "direction": "maximize",
+    "min_delta": 0.001,
+    "max_regression": 0.02,
+    "min_samples": 2,
+    "robustness_audit": {
+      "enabled": true,
+      "folds": 2,
+      "max_fold_regression": 0.02
+    },
+    "detailed_metrics": {
+      "enabled": true
+    },
+    "group_audit": {
+      "enabled": true,
+      "max_groups": 256,
+      "max_fold_regression": 0.02
+    }
+  },
+  "budget": {
+    "cpu_seconds": 3600,
+    "tokens": 120000,
+    "label_quota": 0,
+    "max_stages": 60,
+    "max_candidates_per_stage": 2,
+    "max_training_trials_per_stage": 3
+  }
+}

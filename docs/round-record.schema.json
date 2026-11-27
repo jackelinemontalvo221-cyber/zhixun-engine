@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gkdzjc/zhixun-engine/docs/round-record.schema.json",
+  "title": "Zhixun Engine Round Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_id",
+    "run_id",
+    "dataset_key",
+    "round_index",
+    "task_id",
+    "stage_id",
+    "data",
+    "active_before",
+    "diagnosis",
+    "decision",
+    "candidate",
+    "evaluation",
+    "final_action",
+    "selected_artifact_id",
+    "metrics",
+    "resources",
+    "code",
+    "history_ids",
+    "model_call_ids",
+    "platform_ack",
+    "swanlab",
+    "acceptance"
+  ],
+  "properties": {
+    "schema_version": {"const": "round-record.v1"},
+    "record_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "dataset_key": {"type": "string", "minLength": 1},
+    "round_index": {"type": "integer", "minimum": 0},
+    "task_id": {"type": "string", "minLength": 1},
+    "stage_id": {"type": "string", "minLength": 1},
+    "attempt_id": {"type": ["string", "null"]},
+    "data": {
+      "type": "object",
+      "required": ["training", "validation"],
+      "properties": {
+        "training": {"type": "object"},
+        "validation": {"type": "object"}
+      }
+    },
+    "active_before": {"type": ["object", "null"]},
+    "diagnosis": {"type": "object"},
+    "decision": {"type": "object"},
+    "candidate": {"type": ["object", "null"]},
+    "evaluation": {"type": ["object", "null"]},
+    "final_action": {
+      "enum": ["no_update", "promote", "keep", "rollback", "failed"]
+    },
+    "selected_artifact_id": {"type": "string", "minLength": 1},
+    "metrics": {
+      "type": "object",
+      "required": ["metric_name", "baseline", "candidate", "delta"],
+      "properties": {
+        "metric_name": {"type": ["string", "null"]},
+        "baseline": {"type": "object"},
+        "candidate": {"type": "object"},
+        "delta": {"type": ["number", "null"]}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "required": ["limits", "used", "remaining", "evaluation_cost"],
+      "properties": {
+        "limits": {"type": "object"},
+        "used": {"type": "object"},
+        "remaining": {"type": "object"},
+        "evaluation_cost": {"type": "object"}
+      }
+    },
+    "code": {
+      "type": "object",
+      "required": ["git_commit", "source_sha256", "canonical_sha256"],
+      "properties": {
+        "git_commit": {"type": ["string", "null"]},
+        "source_sha256": {"type": ["string", "null"]},
+        "canonical_sha256": {"type": ["string", "null"]}
+      }
+    },
+    "history_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "model_call_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "platform_ack": {
+      "type": ["object", "null"],
+      "properties": {
+        "received": {"type": "boolean"},
+        "accepted": {"type": "boolean"},
+        "ack_id": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"]}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["contest", "local-simulated", "local-live-qwen", "legacy"]
+        },
+        "model": {"type": ["string", "null"]},
+        "host": {"type": ["string", "null"]}
+      }
+    },
+    "rollback": {
+      "type": ["object", "null"],
+      "properties": {
+        "artifact_id": {"type": "string"},
+        "checkpoint_path": {"type": "string"},
+        "checkpoint_sha256": {"type": "string"},
+        "previous_checkpoint_sha256": {"type": "string"},
+        "restore_dir": {"type": "string"},
+        "predict_argv": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "swanlab": {
+      "type": "object",
+      "required": ["mode", "status"],
+      "properties": {
+        "mode": {"enum": ["offline", "online"]},
+        "status": {"enum": ["local_only", "submitted", "failed"]},
+        "project": {"type": "string"},
+        "experiment_name": {"type": "string"},
+        "url": {"type": ["string", "null"]},
+        "error": {"type": "string"}
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "required": ["status", "error_count", "warning_count", "adaptive", "findings"],
+      "properties": {
+        "status": {
+          "enum": ["pass", "warning", "pending", "fail", "unknown"]
+        },
+        "runtime_status": {
+          "enum": ["pass", "warning", "pending", "fail", "unknown"]
+        },
+        "evidence_status": {
+          "enum": ["pass", "warning", "pending", "fail", "unknown"]
+        },
+        "error_count": {"type": "integer", "minimum": 0},
+        "warning_count": {"type": "integer", "minimum": 0},
+        "pending_count": {"type": "integer", "minimum": 0},
+        "adaptive": {"type": "object"},
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity", "code", "message"]
+          }
+        }
+      }
+    }
+  }
+}

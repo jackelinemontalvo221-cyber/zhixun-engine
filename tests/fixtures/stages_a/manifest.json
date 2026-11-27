@@ -1,0 +1,14 @@
+{
+  "schema_version": "stage-manifest.v1",
+  "stages": [
+    {
+      "dir": "stage-01",
+      "stage_id": "stage-01"
+    },
+    {
+      "dir": "stage-02",
+      "stage_id": "stage-02"
+    }
+  ],
+  "task_id": "A"
+}

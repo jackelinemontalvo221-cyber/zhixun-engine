@@ -1,0 +1,10 @@
+{
+  "schema_version": "dev-profile.v1",
+  "task_id": "C",
+  "package_dir": "cpu-c-guide-20261110-v1",
+  "profile": "baselines/configs/C.json",
+  "initial_checkpoint": "checkpoint.npz",
+  "feature_count": 24,
+  "group_field": ["meta.source_subset", "meta.unit"],
+  "forbidden_input_fields": ["unit", "cycle", "source_subset", "rul", "remainingusefullife"]
+}

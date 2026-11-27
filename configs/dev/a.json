@@ -1,0 +1,10 @@
+{
+  "schema_version": "dev-profile.v1",
+  "task_id": "A",
+  "package_dir": "cpu-a-guide-20261110-v1",
+  "profile": "baselines/configs/A.json",
+  "initial_checkpoint": "checkpoint.npz",
+  "feature_count": 128,
+  "group_field": "meta.source_batch",
+  "forbidden_input_fields": ["id", "source_batch", "source_index"]
+}

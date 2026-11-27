@@ -1,0 +1,16 @@
+{
+  "schema_version": "harness-config.v1",
+  "pipeline": {
+    "diagnose": "member2.drift:DriftDiagnoser",
+    "decide": "member3.decider:LLMDecider"
+  },
+  "evaluator": "official",
+  "predictor": "official",
+  "budget": {
+    "cpu_seconds": 3600,
+    "tokens": 120000,
+    "label_quota": 0,
+    "max_stages": 60,
+    "max_candidates_per_stage": 2
+  }
+}

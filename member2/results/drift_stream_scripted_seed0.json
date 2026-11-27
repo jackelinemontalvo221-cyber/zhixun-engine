@@ -1,0 +1,343 @@
+{
+ "model": "scripted-member2-hint",
+ "seed": 0,
+ "scripted": true,
+ "note": "离线演练：模拟模型按成员2的 update_hint 作答，不是真实 Qwen",
+ "datasets": [
+  {
+   "dataset": "A",
+   "rounds": 10,
+   "summary": {
+    "metric": "macro_f1 (higher is better)",
+    "mean_hidden": 0.9388,
+    "mean_hidden_static": 0.4313,
+    "mean_gain_over_static": 0.5076,
+    "worst_hidden": 0.8226,
+    "final_actions": {
+     "no_update": 1,
+     "promote": 9
+    },
+    "actions": {
+     "adaptive_update": 9,
+     "no_update": 1
+    }
+   },
+   "rounds_detail": [
+    {
+     "round": 1,
+     "batch": "batch2",
+     "new_train_rows": 435,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.7171,
+     "hidden_after": 0.9293,
+     "hidden_static": 0.7171
+    },
+    {
+     "round": 2,
+     "batch": "batch3",
+     "new_train_rows": 555,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.6021,
+     "hidden_after": 0.8226,
+     "hidden_static": 0.599
+    },
+    {
+     "round": 3,
+     "batch": "batch4",
+     "new_train_rows": 56,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.7523,
+     "hidden_after": 0.9172,
+     "hidden_static": 0.4802
+    },
+    {
+     "round": 4,
+     "batch": "batch5",
+     "new_train_rows": 69,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 1,
+      "max_epochs": 1,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.9596,
+     "hidden_after": 0.9758,
+     "hidden_static": 0.6433
+    },
+    {
+     "round": 5,
+     "batch": "batch6",
+     "new_train_rows": 805,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.6077,
+     "hidden_after": 0.9441,
+     "hidden_static": 0.3269
+    },
+    {
+     "round": 6,
+     "batch": "batch7",
+     "new_train_rows": 1264,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.6926,
+     "hidden_after": 0.9899,
+     "hidden_static": 0.3315
+    },
+    {
+     "round": 7,
+     "batch": "batch8",
+     "new_train_rows": 103,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.7004,
+     "hidden_after": 0.8947,
+     "hidden_static": 0.2607
+    },
+    {
+     "round": 8,
+     "batch": "batch9",
+     "new_train_rows": 164,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.752,
+     "hidden_after": 0.9879,
+     "hidden_static": 0.1926
+    },
+    {
+     "round": 9,
+     "batch": "batch10",
+     "new_train_rows": 1260,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 2,
+      "max_epochs": 5,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 0.6461,
+     "hidden_after": 0.9635,
+     "hidden_static": 0.3806
+    },
+    {
+     "round": 10,
+     "batch": "batch10-quiet",
+     "new_train_rows": 0,
+     "action": "no_update",
+     "params": {},
+     "final_action": "no_update",
+     "hidden_before": 0.9635,
+     "hidden_after": 0.9635,
+     "hidden_static": 0.3806
+    }
+   ]
+  },
+  {
+   "dataset": "C",
+   "rounds": 10,
+   "summary": {
+    "metric": "rmse (lower is better)",
+    "mean_hidden": 65.147,
+    "mean_hidden_static": 76.5326,
+    "mean_gain_over_static": 11.3856,
+    "worst_hidden": 88.9167,
+    "final_actions": {
+     "no_update": 1,
+     "promote": 6,
+     "rollback": 3
+    },
+    "actions": {
+     "adaptive_update": 9,
+     "no_update": 1
+    }
+   },
+   "rounds_detail": [
+    {
+     "round": 1,
+     "batch": "FD001-2",
+     "new_train_rows": 2797,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 3,
+      "max_epochs": 2,
+      "seed": 42
+     },
+     "final_action": "rollback",
+     "hidden_before": 43.5926,
+     "hidden_after": 43.5926,
+     "hidden_static": 43.5926
+    },
+    {
+     "round": 2,
+     "batch": "FD003-1",
+     "new_train_rows": 3983,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 3,
+      "max_epochs": 2,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 108.6981,
+     "hidden_after": 65.7733,
+     "hidden_static": 108.6981
+    },
+    {
+     "round": 3,
+     "batch": "FD003-2",
+     "new_train_rows": 4019,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 1,
+      "max_epochs": 1,
+      "seed": 42
+     },
+     "final_action": "rollback",
+     "hidden_before": 43.7047,
+     "hidden_after": 43.7047,
+     "hidden_static": 58.9007
+    },
+    {
+     "round": 4,
+     "batch": "FD002-1",
+     "new_train_rows": 5133,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 3,
+      "max_epochs": 2,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 133.8637,
+     "hidden_after": 61.5276,
+     "hidden_static": 66.6355
+    },
+    {
+     "round": 5,
+     "batch": "FD002-2",
+     "new_train_rows": 5466,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 1,
+      "max_epochs": 1,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 63.7105,
+     "hidden_after": 62.3468,
+     "hidden_static": 66.6614
+    },
+    {
+     "round": 6,
+     "batch": "FD002-3",
+     "new_train_rows": 5049,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 1,
+      "max_epochs": 1,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 60.5337,
+     "hidden_after": 58.8811,
+     "hidden_static": 65.6675
+    },
+    {
+     "round": 7,
+     "batch": "FD004-1",
+     "new_train_rows": 5551,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 3,
+      "max_epochs": 2,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 72.2959,
+     "hidden_after": 67.3816,
+     "hidden_static": 79.8943
+    },
+    {
+     "round": 8,
+     "batch": "FD004-2",
+     "new_train_rows": 6596,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 1,
+      "max_epochs": 1,
+      "seed": 42
+     },
+     "final_action": "rollback",
+     "hidden_before": 70.4287,
+     "hidden_after": 70.4287,
+     "hidden_static": 83.0202
+    },
+    {
+     "round": 9,
+     "batch": "FD004-3",
+     "new_train_rows": 6373,
+     "action": "adaptive_update",
+     "params": {
+      "max_candidates": 3,
+      "max_epochs": 2,
+      "seed": 42
+     },
+     "final_action": "promote",
+     "hidden_before": 87.2131,
+     "hidden_after": 88.9167,
+     "hidden_static": 96.1277
+    },
+    {
+     "round": 10,
+     "batch": "FD004-3-quiet",
+     "new_train_rows": 0,
+     "action": "no_update",
+     "params": {},
+     "final_action": "no_update",
+     "hidden_before": 88.9167,
+     "hidden_after": 88.9167,
+     "hidden_static": 96.1277
+    }
+   ]
+  }
+ ]
+}
