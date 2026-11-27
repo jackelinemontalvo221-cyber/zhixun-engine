@@ -45,8 +45,22 @@ class TrustedStageFiles(dict):
 
     trusted = True
 
+    def __init__(self, *args, source_digest: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.source_digest = source_digest
+
+
+class TrustedRows(list):
+    """Rows already parsed by our round source; no JSONL round-trip is needed."""
+
+    trusted = True
+
 
 def parse_jsonl(raw: bytes, name: str, max_rows: int = DEFAULT_MAX_ROWS, trusted: bool = False) -> list[dict]:
+    if isinstance(raw, TrustedRows):
+        if len(raw) > max_rows:
+            _fail(f"{name} exceeds max_rows={max_rows}", file=name)
+        return list(raw)
     if len(raw) > MAX_FILE_BYTES:
         _fail(f"{name} exceeds {MAX_FILE_BYTES} bytes", file=name)
     try:
@@ -311,7 +325,7 @@ def normalize_stage(raw: Mapping[str, bytes], profile: StageProfile | None = Non
         feature_count=profile.feature_count,
         group_ids=tuple(groups),
         classes=tuple(profile.classes),
-        source_sha256=source_sha256(participating),
+        source_sha256=getattr(raw, "source_digest", None) or source_sha256(participating),
         canonical_sha256="sha256:" + "0" * 64,
         created_at=now_utc(),
         ids=tuple(ids),

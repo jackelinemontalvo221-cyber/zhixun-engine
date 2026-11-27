@@ -43,7 +43,14 @@ def test_image_records_a_real_commit():
 def test_describe_offline_read_only_non_root():
     out = docker("run", "--rm", *LOCKED, IMAGE, "describe", check=True).stdout
     data = json.loads(out)
-    assert data["protocol"] == "contest.harness.workspace.v2" and data["sdk_version"] == "1.0.4"
+    assert data["protocol"] == "contest.harness.workspace.v2" and data["sdk_version"] == "1.0.5"
+
+
+def test_image_has_no_online_experiment_client():
+    """Formal evaluation is offline; online logging from the container is not allowed."""
+    result = docker("run", "--rm", "--network", "none", "--read-only", "--entrypoint", "python3", IMAGE,
+                    "-c", "import importlib.util as u; print(u.find_spec('swanlab') is None)")
+    assert result.stdout.strip() == "True"
 
 
 @pytest.mark.parametrize("key", ["A", "B", "C"])

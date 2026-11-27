@@ -12,11 +12,13 @@ from pathlib import Path
 
 import numpy as np
 
-from member4.policy import candidate_plans, policy_hints
+from member4.policy import POLICIES, candidate_plans, policy_hints
 from member4.replay import load_buffer, update_buffer
+from member4.strategy import should_stop_epoch, stable_round_streak
 from zhixun_harness.contracts import CandidateModel, now_utc
 from zhixun_harness.errors import BudgetExceeded, TrainingError
 from zhixun_harness.hashing import sha256_bytes
+from zhixun_harness.metrics import nasa_asymmetric_score
 from zhixun_harness.official import import_baselines
 from zhixun_harness.round_state import DEFAULT_WALL_RESERVE_SECONDS
 
@@ -50,16 +52,60 @@ def _validation_metrics(model, bundle) -> dict[str, float]:
     if values.shape != targets.shape:
         raise TrainingError("model prediction count does not match validation rows")
     error = values - targets
-    return {
+    metrics = {
         "rmse": float(np.sqrt(np.mean(np.square(error)))),
         "mae": float(np.mean(np.abs(error))),
     }
+    if str(bundle.task_id) == "C":
+        metrics["nasa_score"] = nasa_asymmetric_score(targets, values)
+    return metrics
 
 
 def _better(value: float, current: float | None, direction: str) -> bool:
     if current is None:
         return True
     return value > current if direction == "maximize" else value < current
+
+
+def _auxiliary_is_safe(
+    metrics: dict[str, float],
+    parent_metrics: dict[str, float],
+    *,
+    task_id: str,
+    max_regression: float,
+) -> bool:
+    """Approximate member5's auxiliary gate before selecting a candidate."""
+
+    if str(task_id) != "C":
+        return True
+    for name in ("mae", "nasa_score"):
+        before = parent_metrics.get(name)
+        after = metrics.get(name)
+        if before is None or after is None:
+            continue
+        before = float(before)
+        after = float(after)
+        regression = after - before
+        limit = float(max_regression) * max(abs(before), 1e-12)
+        if regression > limit:
+            return False
+    return True
+
+
+def _prefer_candidate(
+    value: float,
+    safe: bool,
+    current_value: float | None,
+    current_safe: bool,
+    direction: str,
+) -> bool:
+    """Keep gate-safe candidates ahead of unsafe ones, then compare metric."""
+
+    if current_value is None:
+        return True
+    if safe != current_safe:
+        return safe
+    return _better(value, current_value, direction)
 
 
 def _tail_indices(count: int, ratio: float, new_mask=None) -> np.ndarray:
@@ -174,7 +220,10 @@ class CandidateTrainer:
             stats = self._load_strategy_stats().get(str(dataset_key), {})
         except Exception:
             stats = {}
-        return policy_hints(dataset_key, replay_available=replay is not None, strategy_stats=stats)
+        hints = policy_hints(dataset_key, replay_available=replay is not None, strategy_stats=stats)
+        hints["stable_rounds"] = stable_round_streak(getattr(self.context, "round_log", []) or [])
+        hints["policy_version"] = "member4-champion-challenger-v1"
+        return hints
 
     def estimate_training_cost(self, action, params):
         """Return a conservative CPU estimate before training starts."""
@@ -450,10 +499,12 @@ class CandidateTrainer:
 
         parent_metrics = _validation_metrics(import_baselines().model.Model.load(self.context.checkpoint_path), validation)
         parent_score = float(parent_metrics[metric_name])
+        max_regression = float(gate.get("max_regression", 0.02))
         trials = []
         selected = None
         selected_plan = None
         selected_metric = None
+        selected_safe = False
         parent_path = Path(self.context.checkpoint_path)
         total_row_epochs = 0
         total_cpu = 0.0
@@ -473,6 +524,7 @@ class CandidateTrainer:
                 trial["data_mode"] = plan["data_mode"]
             epoch_best = None
             epoch_best_metric = None
+            epoch_best_safe = False
             epoch_best_loss = None
             try:
                 parent_model = import_baselines().model.Model.load(parent_path)
@@ -484,6 +536,14 @@ class CandidateTrainer:
                     replay_fraction=float(plan.get("replay_fraction", 0.0)),
                 )
                 trial["training_rows"] = int(len(train_x))
+                if plan.get("input_refit"):
+                    model.mean = np.asarray(train_x, dtype=np.float64).mean(axis=0)
+                    model.scale = np.asarray(train_x, dtype=np.float64).std(axis=0)
+                    model.scale[model.scale < 1e-12] = 1.0
+                    trial["input_refit"] = True
+                policy = POLICIES.get(str(bundle.task_id), {})
+                patience = int(policy.get("early_stop_patience", 2))
+                min_epochs = int(policy.get("early_stop_min_epochs", 1))
                 for epoch in range(1, plan["max_epochs"] + 1):
                     if _wall_expired(self.context):
                         break
@@ -493,19 +553,43 @@ class CandidateTrainer:
                     if metric_name not in metrics:
                         raise TrainingError(f"validation metric is missing: {metric_name}")
                     score = float(metrics[metric_name])
+                    gate_safe = _auxiliary_is_safe(
+                        metrics,
+                        parent_metrics,
+                        task_id=bundle.task_id,
+                        max_regression=max_regression,
+                    )
                     epoch_record = {
                         "epoch": epoch,
                         "loss": float(losses[-1]),
                         "metrics": dict(metrics),
+                        "gate_safe": gate_safe,
                     }
                     trial["epochs"].append(epoch_record)
-                    if _better(score, epoch_best_metric, direction):
+                    if _prefer_candidate(
+                        score,
+                        gate_safe,
+                        epoch_best_metric,
+                        epoch_best_safe,
+                        direction,
+                    ):
                         epoch_best = deepcopy(model)
                         epoch_best_metric = score
+                        epoch_best_safe = gate_safe
                         epoch_best_loss = float(losses[-1])
                         trial["best_epoch"] = epoch
+                        trial["best_gate_safe"] = gate_safe
                         trial["best_metrics"] = dict(metrics)
                         trial["best_loss"] = epoch_best_loss
+                    if should_stop_epoch(
+                        epoch,
+                        trial.get("best_epoch"),
+                        patience=patience,
+                        min_epochs=min_epochs,
+                    ):
+                        trial["stopped_early"] = True
+                        break
+                trial["epochs_run"] = len(trial["epochs"])
             except BudgetExceeded:
                 raise
             except Exception as exc:
@@ -516,10 +600,17 @@ class CandidateTrainer:
                 total_cpu += elapsed
             trials.append(trial)
 
-            if epoch_best is not None and _better(epoch_best_metric, selected_metric, direction):
+            if epoch_best is not None and _prefer_candidate(
+                epoch_best_metric,
+                epoch_best_safe,
+                selected_metric,
+                selected_safe,
+                direction,
+            ):
                 selected = epoch_best
                 selected_plan = plan
                 selected_metric = epoch_best_metric
+                selected_safe = epoch_best_safe
                 selected_loss = epoch_best_loss
                 selected_metrics = dict(trial["best_metrics"])
 
@@ -565,11 +656,17 @@ class CandidateTrainer:
                 "learning_rate": float(selected.meta["learning_rate"]),
                 "batch_size": int(selected.meta["batch_size"]),
                 "seed": int(selected.meta["seed"]),
+                "input_refit": bool(selected_plan.get("input_refit", False)),
                 "new_rows_fraction": round(new_fraction, 6),
                 "replay_rows_used": 0 if replay is None else len(replay["features"]),
                 "replay_rows_saved": replay_rows,
                 "replay_error": replay_error,
                 "strategy_stats": stats,
+                "gate_safe": selected_safe,
+                "auxiliary_gate": {
+                    "task_id": str(bundle.task_id),
+                    "max_regression": max_regression,
+                },
                 "trials": trials,
             },
         )

@@ -167,12 +167,13 @@ def write_evidence_bundle(
         return "pass"
 
     errors = [item for item in findings if item["severity"] == "error"]
+    aggregate_evidence = combined(evidence_statuses)
     result = {
         "schema_version": BUNDLE_SCHEMA,
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "status": "fail" if errors else "pass",
+        "status": "fail" if errors else "warning" if aggregate_evidence != "pass" else "pass",
         "runtime_status": combined(runtime_statuses),
-        "evidence_status": combined(evidence_statuses),
+        "evidence_status": aggregate_evidence,
         "expected_commit": expected_commit,
         "require_platform": require_platform,
         "record_count": len(all_rows),

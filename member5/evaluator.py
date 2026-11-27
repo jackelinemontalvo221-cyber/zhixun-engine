@@ -54,6 +54,7 @@ METRIC_DIRECTIONS = {
     "balanced_accuracy": "maximize",
     "rmse": "minimize",
     "mae": "minimize",
+    "nasa_score": "minimize",
 }
 
 

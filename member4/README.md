@@ -32,13 +32,16 @@ train_candidate(bundle, decision, active, budget) -> CandidateModel | None
 指标最好的 checkpoint，再在不同计划之间选择最终候选。候选仍必须经过成员5
 的非回归门控才能上线。
 
+搜索器会折叠同一父模型、同一数据变换下已被长候选覆盖的短候选；长时间
+没有验证提升的计划会提前停止。这样可以避免重复训练和无收益 epoch。
+
 当前默认计划：
 
 | 任务 | 候选计划 | 选择指标 |
 | --- | --- | --- |
-| A | 全量1 epoch；全量最多5 epoch | Macro-F1 |
-| B | 最近30%（按轴承）；全量1 epoch；可用时加入近期历史回放 | RMSE |
-| C | 最近20%，最多2 epoch；全量1 epoch；可用时加入近期历史回放 | RMSE |
+| A | 全量最多20 epoch，逐 epoch 选优 | Macro-F1 |
+| B | 最近30%（按轴承）最多3 epoch；全量1 epoch；可用时加入近期历史回放 | RMSE |
+| C | 全量最多8 epoch，使用训练集重新拟合输入标准化；可用时加入历史回放 | RMSE |
 
 所有候选都从同一个父检查点继续训练，保持父模型的任务、特征路径、类别和 MLP
 宽度；平台要求基于官方 baseline 和父检查点续训，不允许提交改变结构的新模型。
@@ -53,6 +56,15 @@ train_candidate(bundle, decision, active, budget) -> CandidateModel | None
 | `members/training/audit.jsonl` | 不可覆盖的历史候选审计 |
 
 可选候选会根据历史策略统计重新排序；已证明长期无效的候选会降低优先级。
+
+### Champion–challenger 与预算
+
+- 无新训练数据且指标没有退化时，默认不训练；
+- B 连续稳定达到配置间隔且 CPU 预算充足时，允许 `1 candidate x 1 epoch`；
+- C 默认关闭周期探测，避免放大 NASA 非对称误差风险；
+- C 的全量候选只用当前训练集重新拟合输入标准化统计量，最多 8 epoch；
+- 无退化但有新数据时，使用受限 idle search；明显漂移才展开完整搜索；
+- 所有候选仍经过验证集和成员5门控，不会因为“探测”自动上线。
 
 公开B验证集的初步对照：
 
@@ -109,4 +121,4 @@ python -m pytest -q tests/test_member4_trainer.py
   运行数据重新标定。
 - `retrain_full` 使用当前训练 bundle；平台是否向当前容器提供更早历史训练数据，
   应以正式数据合同为准。
-- 集成分支已切换到 SDK 1.0.4，并使用 `chunked-v1` 分块上传测试宿主。
+- 集成分支已切换到 SDK 1.0.5，并使用 `chunked-v1` 分块上传测试宿主。

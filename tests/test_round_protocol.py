@@ -45,7 +45,7 @@ def read_jsonl(path: Path, limit: int | None = None):
 
 
 class WorkspaceHost:
-    """In-memory implementation of the SDK 1.0.4 workspace host protocol."""
+    """In-memory implementation of the SDK 1.0.5 workspace host protocol."""
 
     def __init__(self, start: dict, model_content: str = "ok", call_id: str = "call-1",
                  usage_tokens: int | None = None, history=None, artifact_payloads=None):

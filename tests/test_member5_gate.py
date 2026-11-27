@@ -126,6 +126,19 @@ def test_error_metric_tolerance_is_relative():
     assert decision == "rollback" and "relative" in reasons[-1]
 
 
+def test_nasa_regression_rejects_a_candidate_that_only_improves_rmse():
+    decision, _, reasons = compare_metrics(
+        {"rmse": 40.0, "nasa_score": 100.0},
+        {"rmse": 38.0, "nasa_score": 120.0},
+        metric_name="rmse",
+        direction="minimize",
+        min_delta=0.001,
+        max_regression=0.02,
+    )
+    assert decision == "rollback"
+    assert any("nasa_score" in item for item in reasons)
+
+
 def test_evaluation_gate_promotes_with_same_validation_bundle(tmp_path):
     stage_bundle = bundle()
     active_payload = b"active-checkpoint"

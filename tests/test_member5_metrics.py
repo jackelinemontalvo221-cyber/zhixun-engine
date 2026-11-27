@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from member5.metrics import classification_metrics, regression_metrics
+from member5.metrics import classification_metrics, nasa_asymmetric_score, regression_metrics
 from zhixun_harness.errors import EvaluationError
 
 
@@ -50,3 +50,10 @@ def test_regression_metrics_include_worst_batch():
 def test_regression_metrics_reject_negative_prediction():
     with pytest.raises(EvaluationError, match="non-negative"):
         regression_metrics([1.0], [-0.1])
+
+
+def test_nasa_score_penalizes_overprediction_more():
+    assert nasa_asymmetric_score([10.0, 10.0], [10.0, 10.0]) == pytest.approx(0.0)
+    over = nasa_asymmetric_score([10.0, 10.0], [11.0, 11.0])
+    under = nasa_asymmetric_score([10.0, 10.0], [9.0, 9.0])
+    assert over > under >= 0

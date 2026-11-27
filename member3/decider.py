@@ -40,6 +40,54 @@ def parse_notes(diagnosis):
         return {}
 
 
+_DIAGNOSIS_KEYS = (
+    "metric",
+    "current",
+    "current_src",
+    "reference",
+    "reference_src",
+    "perf_drop",
+    "new_rows_score",
+    "new_rows_drop",
+    "severity",
+    "split",
+    "rows",
+    "new_fraction",
+    "rule",
+    "probe_due",
+    "stable_rounds",
+    "rollback_hint",
+)
+_SIGNAL_KEYS = (
+    "psi_mean",
+    "psi_max",
+    "psi_frac_gt_0.25",
+    "ks_frac_sig",
+    "clip_increase",
+    "unseen_regime_share",
+    "label_shift",
+    "conf_drop",
+    "regime_tv",
+)
+
+
+def _compact_diagnosis(notes: dict) -> dict:
+    """Keep the fields a decision needs, not the full audit report.
+
+    The complete report remains in the round record.  Repeating distribution
+    statistics, feature rankings and trends in every Qwen prompt is expensive
+    and does not change the small action choice.
+    """
+
+    result = {key: notes[key] for key in _DIAGNOSIS_KEYS if key in notes}
+    signals = notes.get("signals")
+    if isinstance(signals, dict):
+        result["signals"] = {key: signals[key] for key in _SIGNAL_KEYS if key in signals}
+    if "attribution" in notes:
+        result["attribution"] = clip_text(notes["attribution"], 700)
+    return result
+
+
 _THINK = re.compile(r"<think>.*?</think>", re.S)
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.S)
 
@@ -161,7 +209,7 @@ class LLMDecider:
         summaries = summaries[-6:]
         update_hint = self._valid_update_hint(notes.get("update_hint"))
         model_seed = self._valid_model_seed(notes.get("model_seed"))
-        diagnosis_evidence = dict(notes)
+        diagnosis_evidence = _compact_diagnosis(notes)
         if update_hint is None:
             diagnosis_evidence.pop("update_hint", None)
         else:
@@ -180,8 +228,10 @@ class LLMDecider:
             "diagnosis": diagnosis_evidence,
             "update_hint": update_hint,
             "model_seed": model_seed,
+            "probe_due": bool(notes.get("probe_due", False)),
+            "stable_rounds": int(notes.get("stable_rounds", 0) or 0),
             "remaining_budget": budget.remaining(),
-            "history_excerpt": clip_text(json.dumps(summaries, ensure_ascii=False, default=str), 3500),
+            "history_excerpt": clip_text(json.dumps(summaries, ensure_ascii=False, default=str), 2200),
             "allowed_actions": sorted(allowed),
             "rollback_targets": self._rollback_targets() if "rollback" in allowed else [],
             "training_policy": getattr(self.context, "training_policy", {}),
@@ -205,6 +255,7 @@ class LLMDecider:
             "retrain_recent还必须提供window_ratio。"
             "F1 越高越好，RMSE 越低越好。不要只根据漂移分数或 PSI 高就训练。"
             "训练集参考成绩偏乐观；缺失信息不代表严重漂移。notes.update_hint 是本轮 adaptive_update 搜索规模的首选默认提示：明显退化时优先采用成员4任务对应的默认规模；没有下降且预算充足时，若提示为 1 个候选、1 个 epoch，通常做这次轻量更新；提示为 no_update、为空或无效时，不要编造搜索规模。epochs_hint 是普通训练轮数提示，不等于 adaptive_update 的 max_epochs。"
+            "probe_due=true 表示冠军模型已经连续稳定若干轮，允许一次低成本探测；优先使用 update_hint 给出的 1 个候选、1 个 epoch，并通过同一验证门控决定是否保留。"
             "优先沿用 update_hint 的搜索规模，并结合近期历史、失败尝试与剩余预算作判断；有充分证据说明轻量更新无益时才拒绝。"
             "retrain_full 也必须从当前父检查点续训，不是重新初始化。"
             "rollback_targets 只列出本数据集曾经上线过的模型及其上线时的成绩。成绩下降通常意味着新的漂移，续训一般比退回旧模型更好："
@@ -339,10 +390,12 @@ class LLMDecider:
                     if _outcome_unknown(gateway):
                         raise DecisionError("model retry outcome unknown") from exc
                     break
-                self.last_record = {**audit, "status": "call_failed",
-                                    "error_type": type(exc).__name__, "reserved_tokens": reserved}
+                detail = " ".join(str(exc).split())[:300]
+                self.last_record = {**audit, "status": "call_failed", "error_type": type(exc).__name__,
+                                    "error": detail, "reserved_tokens": reserved}
                 self._save_record()
-                raise DecisionError("model call failed; no valid decision receipt") from exc
+                raise DecisionError("model call failed; no valid decision receipt "
+                                    f"({type(exc).__name__}: {detail})") from exc
             response = receipt.response if isinstance(receipt.response, dict) else {}
             usage = response.get("usage", {})
             actual = usage.get("total_tokens") if isinstance(usage, dict) else None

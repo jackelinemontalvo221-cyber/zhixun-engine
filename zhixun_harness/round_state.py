@@ -1,5 +1,6 @@
 """Writable, dataset-scoped state shared across harness rounds."""
 from dataclasses import dataclass, field
+import base64
 from pathlib import Path
 import hashlib
 import json
@@ -9,6 +10,9 @@ import numpy as np
 
 # Keep enough time to upload the state/candidate and receive the platform ack.
 DEFAULT_WALL_RESERVE_SECONDS = 30.0
+ROW_STATE_SCHEMA = "row-bloom-v1"
+ROW_BLOOM_BITS = 1 << 24
+ROW_BLOOM_HASHES = 4
 
 
 class RoundState:
@@ -41,18 +45,67 @@ class RowDelta:
     previous_count: int
 
 
-ROW_KEY_HEX = 16   # 64-bit row keys: collisions are negligible at our row counts
-
-
-def _row_keys(bundle) -> list[str]:
+def _row_digests(bundle) -> list[bytes]:
+    """SHA-256 over id, little-endian feature bytes and target (no JSON round trip)."""
     features = np.ascontiguousarray(np.asarray(bundle.features, dtype="<f8"))
     targets = None if bundle.targets is None else np.asarray(bundle.targets, dtype="<f8").reshape(-1)
-    keys = []
-    for i in range(len(bundle.ids)):
-        digest = hashlib.sha256(bundle.ids[i].encode("utf-8") + b"\x1f" + features[i].tobytes() + b"\x1f"
-                                + (b"-" if targets is None else targets[i:i + 1].tobytes()))
-        keys.append(digest.hexdigest()[:ROW_KEY_HEX])
-    return keys
+    return [hashlib.sha256(bundle.ids[i].encode("utf-8") + b"\x1f" + features[i].tobytes() + b"\x1f"
+                           + (b"-" if targets is None else targets[i:i + 1].tobytes())).digest()
+            for i in range(len(bundle.ids))]
+
+
+def _new_bloom() -> bytearray:
+    return bytearray((ROW_BLOOM_BITS + 7) // 8)
+
+
+def _bloom_positions(digest: bytes):
+    for index in range(ROW_BLOOM_HASHES):
+        start = index * 8
+        value = int.from_bytes(digest[start:start + 8], "big")
+        yield value % ROW_BLOOM_BITS
+
+
+def _bloom_contains(bits: bytearray, digest: bytes) -> bool:
+    return all(bits[position >> 3] & (1 << (position & 7)) for position in _bloom_positions(digest))
+
+
+def _bloom_add(bits: bytearray, digest: bytes):
+    for position in _bloom_positions(digest):
+        bits[position >> 3] |= 1 << (position & 7)
+
+
+def _bloom_from_entry(entry) -> tuple[bytearray, int]:
+    if isinstance(entry, dict) and entry.get("schema_version") == ROW_STATE_SCHEMA:
+        try:
+            bits = bytearray(base64.b64decode(entry["bits"], validate=True))
+        except (KeyError, TypeError, ValueError):
+            return _new_bloom(), 0
+        if len(bits) != (ROW_BLOOM_BITS + 7) // 8:
+            return _new_bloom(), 0
+        try:
+            count = max(0, int(entry.get("count", 0)))
+        except (TypeError, ValueError):
+            count = 0
+        return bits, count
+    bits = _new_bloom()
+    values = entry if isinstance(entry, list) else []
+    for value in values:
+        if isinstance(value, str):
+            try:
+                digest = bytes.fromhex(value)
+            except ValueError:
+                continue
+            if len(digest) >= ROW_BLOOM_HASHES * 8:
+                _bloom_add(bits, digest)
+    return bits, len(values)
+
+
+def _bloom_entry(bits: bytearray, count: int) -> dict:
+    return {
+        "schema_version": ROW_STATE_SCHEMA,
+        "bits": base64.b64encode(bits).decode("ascii"),
+        "count": int(count),
+    }
 
 
 def track_rows(state, bundles):
@@ -61,27 +114,33 @@ def track_rows(state, bundles):
     Validation identities stay in a separate namespace; they never become training rows.
     State is scoped by dataset by the caller. No attempt to infer hidden labels.
 
-    Keys are 16 hex characters of a SHA-256 over id, feature bytes and target
-    (64 hex characters of a JSON dump before): ``rows.json`` for the C
-    projection is ~2.5 MB instead of 9.3 MB and hashing is several times faster.
-    Its size is bounded by the number of distinct rows ever seen, which on this
-    platform is the public projection of one dataset.  Keys of the old format
-    never match, so the first round after an upgrade sees every row as new
-    (a larger update hint, never a skipped one).
+    Rows are remembered in a fixed-size Bloom filter (member 4, ``row-bloom-v1``;
+    a few MB, never grows) keyed by a SHA-256 over id, feature bytes and target
+    (hashed without a JSON round trip).  A false positive only makes a new row
+    look seen, which can shrink an update hint, never break a round.
     """
     try:
         previous = state.read("rows.json", {})
     except ValueError:
         previous = {}
+    if not isinstance(previous, dict):
+        previous = {}
+    persisted = {"schema_version": ROW_STATE_SCHEMA}
     result = {}
     for split, bundle in bundles.items():
         if bundle is None:
             continue
-        seen = {key for key in previous.get(split, []) if isinstance(key, str) and len(key) == ROW_KEY_HEX}
-        keys = _row_keys(bundle)
-        result[split] = RowDelta(np.array([k not in seen for k in keys], dtype=bool), "id+content", len(seen))
-        previous[split] = sorted(seen | set(keys))
-    state.write("rows.json", previous)
+        bloom, count = _bloom_from_entry(previous.get(split))
+        new_mask = []
+        for digest in _row_digests(bundle):
+            is_new = not _bloom_contains(bloom, digest)
+            new_mask.append(is_new)
+            if is_new:
+                _bloom_add(bloom, digest)
+                count += 1
+        result[split] = RowDelta(np.asarray(new_mask, dtype=bool), "id+content-bloom", count)
+        persisted[split] = _bloom_entry(bloom, count)
+    state.write("rows.json", persisted)
     return result
 
 

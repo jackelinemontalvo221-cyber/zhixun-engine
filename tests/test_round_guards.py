@@ -370,7 +370,7 @@ def test_wall_clock_counts_data_loading(tmp_path, monkeypatch):
     assert seen["built"] - seen["started"] >= 0.3
 
 
-def test_row_keys_are_compact(tmp_path):
+def test_row_state_detects_new_and_changed_rows(tmp_path):
     import numpy as np
     from types import SimpleNamespace
     from zhixun_harness.round_state import RoundState, track_rows
@@ -380,8 +380,21 @@ def test_row_keys_are_compact(tmp_path):
     state = RoundState(tmp_path)
     assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [True, True]
     stored = json.loads((tmp_path / "rows.json").read_text())
-    assert all(len(key) == 16 for key in stored["train"])
+    assert stored["train"]["schema_version"] == "row-bloom-v1" and stored["train"]["count"] == 2
     assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [False, False]
     changed = SimpleNamespace(ids=("a", "b"), features=np.array([[1.0, 2.0], [3.0, 5.0]]),
                               targets=np.array([1.0, 0.0]))
     assert track_rows(state, {"train": changed})["train"].new_mask.tolist() == [False, True]
+
+
+def test_state_budget_enforces_byte_limit(tmp_path):
+    from zhixun_harness.round_runner import enforce_state_budget
+
+    slot = tmp_path / "datasets" / "x" / "members" / "evaluation"
+    slot.mkdir(parents=True)
+    (tmp_path / "datasets" / "x" / "rows.json").write_bytes(b"x" * 10)
+    for index in range(3):
+        (slot / f"metrics-{index}.json").write_bytes(b"x" * 100)
+    removed = enforce_state_budget(tmp_path, limit=99, byte_limit=150)
+    assert removed
+    assert sum(item.stat().st_size for item in tmp_path.rglob("*") if item.is_file()) <= 150

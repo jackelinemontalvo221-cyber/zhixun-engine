@@ -11,6 +11,10 @@ dependencies = ["numpy==1.26.4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Not installed in the contest image: the formal evaluation runs offline and the rules forbid
+# unauthorised network access.  Platform runs are backfilled to SwanLab afterwards with
+# scripts/upload_platform_runs.py.
+swanlab = ["swanlab==0.10.5"]
 live = ["httpx>=0.28.1", "pytrio>=0.2.10"]
 
 [tool.setuptools]

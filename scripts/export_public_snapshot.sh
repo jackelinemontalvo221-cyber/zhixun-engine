@@ -6,8 +6,10 @@
 #   bash scripts/export_public_snapshot.sh <output-dir> [public-remote-url]
 #
 # Only committed files are exported (never .env, local configs or untracked files).
-# Excluded on purpose: official contest packages and data (cpu-*), the problem statement
-# PDF, the SDK tarball, local run artifacts.  With a remote URL the snapshot is committed
+# Excluded on purpose: official contest data/training packages (cpu-*), the problem
+# statement PDF, and local run artifacts.  The small official SDK archive is retained
+# so the public source CI installs the same SDK version as the submitted image.  With a
+# remote URL the snapshot is committed
 # as one commit "snapshot of <commit>" and pushed to that repository's main branch
 # (force-push: the public repository only mirrors snapshots).
 set -euo pipefail
@@ -24,7 +26,7 @@ COMMIT=$(git rev-parse HEAD)
 mkdir -p "$OUT"
 
 git archive --format=tar HEAD | tar -x -C "$OUT"
-rm -rf "$OUT"/cpu-*-20261110-v1 "$OUT"/artifacts "$OUT"/contest-harness-sdk-*.tar.gz "$OUT"/*.pdf
+rm -rf "$OUT"/cpu-*-20261110-v1 "$OUT"/artifacts "$OUT"/contest-harness-sdk-1.0.4.tar.gz "$OUT"/*.pdf
 find "$OUT" -name "*.Zone.Identifier" -delete
 
 # refuse to publish anything that looks like a credential

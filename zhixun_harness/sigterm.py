@@ -6,7 +6,7 @@ until SIGKILL.  The SDK only imports ``contest_submission`` after it has read th
 frame, so the handler must exist earlier: the image installs ``zhixun_sigterm.pth`` in
 site-packages, which imports this module when the interpreter starts.
 
-SDK 1.0.4 forbids continuing RPC after an interruption, so the handler just exits.
+SDK 1.0.5 forbids continuing RPC after an interruption, so the handler just exits.
 """
 
 from __future__ import annotations

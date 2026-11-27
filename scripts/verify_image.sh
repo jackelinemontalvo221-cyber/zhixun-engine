@@ -27,7 +27,7 @@ case "$describe" in
   *) fail "unexpected describe output: $describe" ;;
 esac
 case "$describe" in
-  *'"sdk_version":"1.0.4"'*) ;;
+  *'"sdk_version":"1.0.5"'*) ;;
   *) fail "unexpected SDK version: $describe" ;;
 esac
 

@@ -110,19 +110,25 @@ PRUNABLE_STATE = (
 STATE_FILE_BUDGET = MAX_UPLOAD_FILES - 4
 
 
-def enforce_state_budget(state_root, limit: int = STATE_FILE_BUDGET) -> list[str]:
-    """Delete the oldest prunable files until the state fits ``limit`` files."""
+def enforce_state_budget(
+    state_root,
+    limit: int = STATE_FILE_BUDGET,
+    byte_limit: int = MAX_UPLOAD_BYTES,
+) -> list[str]:
+    """Delete prunable files until the state fits the file and byte budgets."""
     root = Path(state_root)
     files = [item for item in root.rglob("*") if item.is_file() and not item.is_symlink()]
     removed = []
-    if len(files) <= limit:
+    total_bytes = sum(item.stat().st_size for item in files)
+    if len(files) <= limit and total_bytes <= byte_limit:
         return removed
     for prefix in PRUNABLE_STATE:
         matches = sorted((item for item in files if prefix in item.relative_to(root).as_posix()),
                          key=lambda item: item.stat().st_mtime_ns)
         for item in matches:
-            if len(files) - len(removed) <= limit:
+            if len(files) - len(removed) <= limit and total_bytes <= byte_limit:
                 return removed
+            total_bytes -= item.stat().st_size
             item.unlink()
             removed.append(item.relative_to(root).as_posix())
     return removed
@@ -456,6 +462,7 @@ def _parent_classes(rnd):
 
 def _run(run, pipeline, evaluator) -> dict:
     rnd, config = run.rnd, run.config
+    round_started_monotonic = time.monotonic()
     cpu_started = time.process_time()
     source = WorkspaceV2Source(rnd, class_order=_parent_classes(rnd))
     run.metric_contract = source.metric_contract
@@ -520,8 +527,8 @@ def _run(run, pipeline, evaluator) -> dict:
                                limits=dict(getattr(rnd, "limits", {}) or {}),
                                lineage=lineage,
                                # from the start of train(), so loading and parsing the
-                               # data (about a minute on C) counts against the wall clock
-                               started_monotonic=run.started,
+                               # data counts against the wall clock
+                               started_monotonic=min(run.started, round_started_monotonic),
                                round_log=list(state.read("round-log.json", []) or [])[-8:])
         run.context = context
         pipeline.bind_round(context)

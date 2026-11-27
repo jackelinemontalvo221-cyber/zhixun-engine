@@ -193,11 +193,17 @@ MAX_EPOCHS_OVERRIDE = {}
 MIN_DELTA = {}          # member 5 gate min_delta per task; harness.full.json uses 0.001
 
 
-def adaptive_params(task, light=False):
+def adaptive_params(task, light=False, idle=False):
     from member4.policy import POLICIES
     policy = POLICIES[task]
     if light:
         return {"max_candidates": 1, "max_epochs": 1, "seed": 42}
+    if idle:
+        return {
+            "max_candidates": int(policy.get("idle_max_candidates", 1)),
+            "max_epochs": int(policy.get("idle_max_epochs", 2)),
+            "seed": 42,
+        }
     epochs = MAX_EPOCHS_OVERRIDE.get(task, int(policy["max_epochs"]))
     return {"max_candidates": int(policy["max_candidates"]), "max_epochs": int(epochs), "seed": 42}
 
@@ -218,8 +224,8 @@ def choose(policy, task, diagnosis, report, idle=True):
     if severity in ("mild", "severe"):
         return "adaptive_update", adaptive_params(task), severity
     if severity == "none" and diagnosis is not None and diagnosis.recommendation in ("finetune", "retrain_full"):
-        light = policy == "m2_adaptive_light" or not drift_module.IDLE_FULL_SEARCH
-        return "adaptive_update", adaptive_params(task, light=light), "light" if light else "idle-full"
+        light = policy == "m2_adaptive_light"
+        return "adaptive_update", adaptive_params(task, light=light, idle=not light), "idle-bounded"
     return "no_update", {}, severity or "unknown"
 
 

@@ -54,8 +54,8 @@ def test_notes_carry_seed_new_fraction_and_update_hint(tmp_path):
     assert notes["new_fraction"] == pytest.approx(1 / 3, abs=1e-3)
     assert d.last_report["severity"] == "none"
     assert notes["update_hint"]["action"] == "adaptive_update"
-    # no drop but plenty of CPU: the full task search (measured to be at least as good)
-    assert (notes["update_hint"]["max_candidates"], notes["update_hint"]["max_epochs"]) == (3, 2)
+    # no drop and new rows: use the bounded idle search, not a full drift search
+    assert (notes["update_hint"]["max_candidates"], notes["update_hint"]["max_epochs"]) == (1, 2)
     assert len(diag.notes.encode("utf-8")) <= 3900
     # the rule fallback built from these notes is accepted by member 4's seed check
     assert decision_from_diagnosis(diag).params["seed"] == 1
@@ -66,7 +66,8 @@ def test_update_hint_sizes():
                           training_policy={"max_candidates": 2, "max_epochs": 5})
     assert _update_hint("severe", "retrain_full", ctx)["max_candidates"] == 2
     assert _update_hint("mild", "finetune", ctx)["max_epochs"] == 5
-    assert _update_hint("none", "finetune", ctx)["max_epochs"] == 5
+    assert _update_hint("none", "finetune", ctx)["max_epochs"] == 2
+    assert _update_hint("none", "finetune", ctx)["max_candidates"] == 1
     assert _update_hint("none", "finetune", ctx, cpu_share_left=0.3)["max_epochs"] == 1
     assert _update_hint("none", "no_update", ctx)["action"] == "no_update"
     assert _update_hint("severe", "retrain_full", SimpleNamespace(supported_actions=("finetune",))) is None
@@ -82,7 +83,7 @@ def test_compare_choose_policies():
     light = compare.choose("m2_adaptive_light", "C", diag, {"severity": "none"})
     assert light[0] == "adaptive_update" and light[1]["max_candidates"] == 1
     idle = compare.choose("m2_adaptive", "C", diag, {"severity": "none"})
-    assert idle[0] == "adaptive_update" and idle[1]["max_candidates"] == 3
+    assert idle[0] == "adaptive_update" and idle[1]["max_candidates"] == 1
     quiet = compare.choose("m2_adaptive", "C", SimpleNamespace(recommendation="no_update"), {"severity": "none"})
     assert quiet[0] == "no_update"
 
@@ -180,4 +181,4 @@ def test_drift_stream_drives_the_live_script_offline(tmp_path):
     assert all(d["model_call_ids"] for d in detail)               # every round made its model call
     assert detail[2]["new_train_rows"] == 0 and detail[2]["action"] == "no_update"
     assert all(np.isfinite(d["hidden_after"]) for d in detail)
-    assert set(report["summary"]["final_actions"]) <= {"promote", "rollback", "no_update"}
+    assert set(report["summary"]["final_actions"]) <= {"promote", "reject", "rollback", "no_update"}

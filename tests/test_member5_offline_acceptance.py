@@ -27,7 +27,7 @@ def test_offline_acceptance_separates_runtime_from_public_evidence(tmp_path):
         required_actions=("adaptive_update",),
         required_datasets=("C",),
     )
-    assert result["status"] == "pass"
+    assert result["status"] == "warning"
     assert result["runtime_status"] == "pass"
     assert result["evidence_status"] == "pending"
 
@@ -62,6 +62,6 @@ def test_offline_tools_do_not_open_a_socket(tmp_path, monkeypatch):
         output_dir=tmp_path / "export",
         dry_run=True,
     )
-    assert report["status"] == "pass"
+    assert report["status"] == "warning"
     assert export["dry_run"] is True
     assert export["record_count"] == 1

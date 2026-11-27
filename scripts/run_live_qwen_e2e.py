@@ -41,7 +41,9 @@ def _sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _history_entry(record: dict, decision) -> dict:
+def _history_entry(record: dict, decision) -> dict | None:
+    if decision is None or "record_id" not in record:
+        return None          # a failed round leaves no history entry, like on the platform
     return {
         "id": record["record_id"],
         "round_index": record["round_index"],
@@ -108,8 +110,12 @@ def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict)
 
             runner.RoundModelGateway = gateway_factory
             result = runner.run_round(round_object, config=load_config(FULL_CONFIG))
-            record = json.loads(Path(result["record"]["path"]).read_text(encoding="utf-8"))
-            history.append(_history_entry(record, result["decision"]))
+            record = {}
+            if result.get("record") and result["record"].get("path"):
+                record = json.loads(Path(result["record"]["path"]).read_text(encoding="utf-8"))
+            entry = _history_entry(record, result["decision"])
+            if entry is not None:
+                history.append(entry)
 
             if result["final_action"] == "promote":
                 payload = _candidate_upload(host)
@@ -134,8 +140,9 @@ def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict)
             summary = {
                 "dataset": dataset_key,
                 "round": index,
-                "action": result["decision"].action,
-                "params": result["decision"].params,
+                "action": getattr(result["decision"], "action", None),
+                "params": getattr(result["decision"], "params", None),
+                "error": result.get("error"),
                 "final_action": result["final_action"],
                 "selected_artifact_id": result["selected_artifact_id"],
                 "model_call_ids": list(round_object.call_ids),
@@ -151,10 +158,24 @@ def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict)
         "dataset": dataset_key,
         "rounds": rounds,
         "promotions": sum(item["final_action"] == "promote" for item in summaries),
+        "failed_rounds": sum(item["final_action"] == "failed" for item in summaries),
         "records": str(dataset_dir / "work" / "records"),
         "state": str(state_path),
         "rounds_detail": summaries,
     }
+
+
+def preflight(gateway_args: dict) -> str | None:
+    """One tiny real call, so a bad key, model name or network fails in seconds with the reason."""
+    class _Probe:
+        call_ids: list = []
+    try:
+        gateway = PyTRIOQwenGateway(_Probe(), **gateway_args)
+        receipt = gateway.call([{"role": "user", "content": "Reply with the single word: ok"}],
+                               max_tokens=8, temperature=0)
+    except Exception as exc:   # report the real reason, key never included
+        return f"{type(exc).__name__}: {' '.join(str(exc).split())[:800]}"
+    return None if receipt.text.strip() else "empty reply"
 
 
 def main(argv=None) -> int:
@@ -164,6 +185,8 @@ def main(argv=None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--output")
+    parser.add_argument("--skip-preflight", action="store_true",
+                        help="do not send the one-line connectivity check before the run")
     args = parser.parse_args(argv)
     if not 1 <= args.rounds <= 10:
         parser.error("--rounds must be in 1..10")
@@ -182,6 +205,14 @@ def main(argv=None) -> int:
         "timeout": 120.0,
         "max_output_tokens": args.max_tokens,
     }
+    if not args.skip_preflight:
+        error = preflight(gateway_args)
+        if error:
+            print(json.dumps({"status": "preflight_failed", "model": args.model, "error": error},
+                             ensure_ascii=False))
+            shutil.rmtree(output, ignore_errors=True)
+            return 3
+        print(json.dumps({"status": "preflight_ok", "model": args.model}, ensure_ascii=False), flush=True)
 
     previous_provenance = os.environ.get("ZHIXUN_RUN_PROVENANCE")
     os.environ["ZHIXUN_RUN_PROVENANCE"] = "local-live-qwen"

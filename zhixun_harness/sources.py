@@ -6,13 +6,21 @@ adapts the official ``contest_harness`` round object without importing it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Protocol
 
-from .codec import DEFAULT_FORBIDDEN, MAX_FILE_BYTES, TrustedStageFiles, flatten_inputs, parse_jsonl
-from .contracts import StageDescriptor, StageProfile, strict_json_loads
+from .codec import (
+    DEFAULT_FORBIDDEN,
+    MAX_FILE_BYTES,
+    TrustedRows,
+    TrustedStageFiles,
+    flatten_inputs,
+    parse_jsonl,
+)
+from .contracts import StageDescriptor, StageProfile, canonical_json, strict_json_loads
 from .errors import ConfigError, StageDataError
 
 MANIFEST_SCHEMA = "stage-manifest.v1"
@@ -289,30 +297,32 @@ class WorkspaceV2Source:
         return list(self._validation_rows)
 
     def _raw(self, rows, prefix: str) -> dict[str, bytes]:
-        feature_lines = []
-        label_lines = []
+        feature_rows = TrustedRows()
+        label_rows = TrustedRows()
         limits = self.profile.limits or {}
         max_rows = int(limits.get("max_rows", 2_000_000))
         for number, row in enumerate(rows, 1):
             if not isinstance(row, dict) or not isinstance(row.get("id"), str) or "inputs" not in row:
                 raise StageDataError(f"{prefix} row {number} is not a valid sample")
-            feature_lines.append(json.dumps(
-                {"id": row["id"], "inputs": flatten_inputs(row["inputs"], number)},
-                ensure_ascii=False, check_circular=False, separators=(",", ":"),
-            ))
+            feature_rows.append({"id": row["id"], "inputs": row["inputs"]})
             if "answer" in row:
-                label_lines.append(json.dumps(
-                    {"id": row["id"], "answer": row["answer"], "group": self._group_for_row(row)},
-                    ensure_ascii=False,
-                ))
-            if len(feature_lines) > max_rows:
+                label_rows.append({
+                    "id": row["id"],
+                    "answer": row["answer"],
+                    "group": self._group_for_row(row),
+                })
+            if len(feature_rows) > max_rows:
                 raise StageDataError(f"{prefix} exceeds max_rows={max_rows}")
+        digest = hashlib.sha256()
+        for row in rows:
+            digest.update(canonical_json(row).encode("utf-8"))
+            digest.update(b"\n")
         files = TrustedStageFiles({
             "profile.json": json.dumps(self.profile.to_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8"),
-            self.profile.feature_uri: ("\n".join(feature_lines) + "\n").encode("utf-8"),
-        })
-        if label_lines:
-            files[self.profile.label_uri] = ("\n".join(label_lines) + "\n").encode("utf-8")
+            self.profile.feature_uri: feature_rows,
+        }, source_digest="sha256:" + digest.hexdigest())
+        if label_rows:
+            files[self.profile.label_uri] = label_rows
         return files
 
     def read(self, descriptor: StageDescriptor | None = None) -> Mapping[str, bytes]:

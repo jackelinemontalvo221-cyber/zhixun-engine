@@ -98,7 +98,8 @@ round-summary.csv
 
 ## 离线无人干预验收
 
-比赛运行阶段不设置 `SWANLAB_MODE`，因此保持离线。运行结束后执行：
+镜像已包含 SwanLab 依赖。比赛运行默认保持离线；平台需要在线记录时设置
+`SWANLAB_MODE=online` 并提供 `SWANLAB_API_KEY`。运行结束后执行：
 
 ```bash
 python -m member5.offline_acceptance \

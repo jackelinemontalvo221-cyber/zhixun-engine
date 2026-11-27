@@ -19,8 +19,8 @@ LABEL org.opencontainers.image.revision=$GIT_COMMIT
 
 WORKDIR /opt/zhixun
 
-COPY contest-harness-sdk-1.0.4.tar.gz /tmp/contest-harness-sdk-1.0.4.tar.gz
-RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" /tmp/contest-harness-sdk-1.0.4.tar.gz
+COPY contest-harness-sdk-1.0.5.tar.gz /tmp/contest-harness-sdk-1.0.5.tar.gz
+RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" /tmp/contest-harness-sdk-1.0.5.tar.gz
 
 COPY pyproject.toml /opt/zhixun/pyproject.toml
 COPY contest_submission.py /opt/zhixun/contest_submission.py

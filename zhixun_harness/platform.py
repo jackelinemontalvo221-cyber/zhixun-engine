@@ -1,6 +1,6 @@
 """Platform adapters.
 
-``WorkspaceV2Source`` is the implemented adapter for contest_harness 1.0.4.
+``WorkspaceV2Source`` is the implemented adapter for contest_harness 1.0.5.
 ``PlatformStageSource`` is a deliberate stub for a future contract.
 """
 

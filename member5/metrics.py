@@ -14,11 +14,11 @@ import numpy as np
 
 from zhixun_harness.contracts import StageBundle
 from zhixun_harness.errors import EvaluationError
+from zhixun_harness.metrics import nasa_asymmetric_score
 from zhixun_harness.official import import_baselines
 
 
 DETAILED_METRICS_SCHEMA = "member5-detailed-metrics.v1"
-
 
 def _classification_labels(predictions, sample_count: int, class_count: int) -> np.ndarray:
     values = np.asarray(predictions)
@@ -208,6 +208,8 @@ def evaluate_checkpoint_details(
         )
     elif bundle.task_type == "regression":
         metrics, details = regression_metrics(bundle.targets, predictions)
+        if str(bundle.task_id) == "C":
+            metrics["nasa_score"] = nasa_asymmetric_score(bundle.targets, predictions)
     else:
         raise EvaluationError(f"unsupported task type: {bundle.task_type}")
     details.update(

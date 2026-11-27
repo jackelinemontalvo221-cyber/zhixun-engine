@@ -333,7 +333,7 @@ def test_replay_buffer_persists_and_becomes_a_candidate(tmp_path):
         second_active,
         budget(),
     )
-    assert any(trial["name"] == "replay-recent" for trial in second.config["trials"])
+    assert any(trial["name"] == "replay-input-refit" for trial in second.config["trials"])
     assert second.config["replay_rows_used"] > 0
 
 
@@ -341,7 +341,28 @@ def test_policy_hints_are_task_specific():
     trainer = CandidateTrainer()
     assert trainer.policy_hints("A")["metric_name"] == "macro_f1"
     assert trainer.policy_hints("B")["window_ratio"] == 0.3
-    assert trainer.policy_hints("C")["max_epochs"] == 10
+    assert trainer.policy_hints("C")["max_epochs"] == 8
+
+
+def test_c_adaptive_candidate_refits_input_scaler_from_training_rows():
+    model, bundle, active, context, _ = load_case(*PACKAGES[2])
+    candidate = make_trainer(context).train_candidate(
+        bundle,
+        make_decision(
+            action="adaptive_update",
+            seed=model.meta["seed"],
+            max_candidates=1,
+            max_epochs=1,
+        ),
+        active,
+        budget(),
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "checkpoint.npz"
+        path.write_bytes(candidate.checkpoint_bytes)
+        continued = import_baselines().model.Model.load(path)
+    assert candidate.config["input_refit"] is True
+    assert candidate.config["trials"][0]["input_refit"] is True
 
 
 def test_strategy_history_can_promote_optional_replay_candidate():
@@ -356,8 +377,8 @@ def test_strategy_history_can_promote_optional_replay_candidate():
         },
     )
     assert [plan["name"] for plan in plans] == [
-        "recent-short",
         "recent-selected",
+        "full-short",
         "replay-recent",
     ]
 

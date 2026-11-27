@@ -89,7 +89,7 @@ def evaluate_offline_acceptance(
     evidence_statuses = {row["evidence_status"] for row in rows}
     result = {
         "schema_version": ACCEPTANCE_SCHEMA,
-        "status": "fail" if failures else "pass",
+        "status": "fail" if failures else "warning" if evidence_statuses - {"pass"} else "pass",
         "record_count": len(rows),
         "runtime_status": (
             "fail"

@@ -19,10 +19,10 @@
 
 ## 验证与限制
 
-本地补充环境：Windows、Python 3.13.15、NumPy 2.5.4、pytest 9.2.0、官方 SDK 1.0.4。
+本地补充环境：Windows、Python 3.13.15、NumPy 2.5.4、pytest 9.2.0、官方 SDK 1.0.5。
 使用已有本地包建立离线环境，未联网调用模型。未修改 pyproject.toml 中的 NumPy 1.26.4 依赖。
 完整回归：127 passed, 1 skipped；跳过 Windows 无权限创建符号链接的测试。
-describe 正常返回 SDK 1.0.4、classification / regression；member3.demo 的五种模拟场景完成。
+describe 正常返回 SDK 1.0.5、classification / regression；member3.demo 的五种模拟场景完成。
 
 这不是团队要求的 Python 3.12 + NumPy 1.26.4 空白环境验收，也不代表 Linux 容器或真实平台调用成功。
 最初的临时测试方式有两个子进程找不到 SDK 的环境错误；将 SDK 放入独立离线环境后，全套回归通过。
@@ -37,7 +37,7 @@ describe 正常返回 SDK 1.0.4、classification / regression；member3.demo 的
 
 ```text
 python -m pip install -e ".[dev]"
-python -m pip install ./contest-harness-sdk-1.0.4.tar.gz
+python -m pip install ./contest-harness-sdk-1.0.5.tar.gz
 python -m pytest -q
 python -m member3.demo
 ```

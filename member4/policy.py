@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from member4.strategy import collapse_plan_prefixes
+
 
 POLICIES = {
     "A": {
@@ -16,6 +18,14 @@ POLICIES = {
         # per-epoch validation selection reached mean F1 0.940 vs 0.926 at 5 epochs;
         # CPU stayed under 4 s per run, far below the 3600 s budget.
         "max_epochs": 20,
+        "early_stop_min_epochs": 2,
+        "early_stop_patience": 4,
+        "probe_interval": 0,
+        "probe_min_cpu_share": 0.25,
+        "probe_max_candidates": 1,
+        "probe_max_epochs": 1,
+        "idle_max_candidates": 1,
+        "idle_max_epochs": 2,
         "guidance": (
             "比较全量1个epoch与最多20个epoch（逐epoch按验证集选最佳）；"
             "性能没有下降且没有新数据时选择no_update。"
@@ -29,9 +39,18 @@ POLICIES = {
         "max_candidates": 3,
         "max_epochs": 5,
         "window_ratio": 0.3,
+        "early_stop_min_epochs": 1,
+        "early_stop_patience": 2,
+        "probe_interval": 4,
+        "probe_min_cpu_share": 0.25,
+        "probe_max_candidates": 1,
+        "probe_max_epochs": 1,
+        "idle_max_candidates": 1,
+        "idle_max_epochs": 1,
         "guidance": (
             "优先使用近期数据；可比较普通近期微调与全量短续训。"
-            "无退化时选择no_update，历史同类训练失败时减少搜索。"
+            "无退化时选择no_update；连续稳定后允许一次低成本探测，"
+            "历史同类训练失败时减少搜索。"
         ),
     },
     "C": {
@@ -40,16 +59,27 @@ POLICIES = {
         "metric_direction": "minimize",
         "allowed_actions": ("no_update", "adaptive_update"),
         "max_candidates": 3,
-        # Platform trial 11/27: the C training projection is the same in every round,
-        # so "recent 20% per unit" is just the near-failure tail of each engine.  On the
-        # public package with half the validation units held out (3 splits), recent-20%
-        # made held-out RMSE worse (+16 after 1 epoch) while full data with per-epoch
-        # selection up to 10 epochs improved it (-1.2 to -1.7); further rounds added
-        # little.  Full data comes first; the recent window stays as a cheap alternative.
-        "max_epochs": 10,
+        # C-MAPSS held-out sweep (3 random unit-disjoint splits): refitting the
+        # input mean/scale on the current training projection and selecting over
+        # up to 8 full-data epochs reduced average held-out RMSE from 63.83 to
+        # 56.84 and kept the worst stage essentially flat, while staying below
+        # the original full-search CPU cost.  The validation/hidden projections
+        # are never used to fit these statistics.
+        "max_epochs": 8,
         "window_ratio": 0.2,
+        "early_stop_min_epochs": 2,
+        "early_stop_patience": 3,
+        # C has a high asymmetric-error risk on the current hidden projection.
+        # Keep the champion stable until a separate C safety experiment enables
+        # periodic probes.
+        "probe_interval": 0,
+        "probe_min_cpu_share": 0.25,
+        "probe_max_candidates": 1,
+        "probe_max_epochs": 1,
+        "idle_max_candidates": 1,
+        "idle_max_epochs": 2,
         "guidance": (
-            "优先全量数据续训最多10个epoch（逐epoch按验证集选最佳），并与最近20%数据1-2个epoch比较；"
+            "优先全量数据续训，并只用当前训练集重新拟合输入标准化统计量，最多8个epoch；"
             "RMSE没有改善或没有新数据时选择no_update。"
         ),
     },
@@ -134,25 +164,22 @@ def candidate_plans(
                 "max_epochs": min(2, max_epochs),
             })
     elif key == "C":
-        window = 0.2
         plans = [
-            # epoch 1 of full-selected is also evaluated, so it covers the old full-short
-            {"name": "full-selected", "action": "retrain_full", "max_epochs": min(10, max_epochs)},
             {
-                "name": "recent-selected",
-                "action": "retrain_recent",
-                "window_ratio": window,
-                "max_epochs": min(2, max_epochs),
+                "name": "input-refit-selected",
+                "action": "retrain_full",
+                "input_refit": True,
+                "max_epochs": min(8, max_epochs),
             },
         ]
         if replay_available:
             plans.append({
-                "name": "replay-recent",
-                "action": "retrain_recent",
+                "name": "replay-input-refit",
+                "action": "retrain_full",
                 "data_mode": "replay",
                 "replay_fraction": 0.1,
-                "window_ratio": window,
-                "max_epochs": min(2, max_epochs),
+                "input_refit": True,
+                "max_epochs": min(4, max_epochs),
             })
     else:
         window = 0.3
@@ -166,6 +193,7 @@ def candidate_plans(
             },
         ]
 
+    plans = collapse_plan_prefixes(plans)
     core = plans[:min(2, len(plans))]
     optional = plans[min(2, len(plans)):]
     if strategy_stats:

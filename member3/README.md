@@ -36,7 +36,7 @@
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m pip install ./contest-harness-sdk-1.0.4.tar.gz
+python -m pip install ./contest-harness-sdk-1.0.5.tar.gz
 python -X utf8 -m pytest -q --basetemp=.test-tmp
 python -X utf8 -m member3.demo
 ```

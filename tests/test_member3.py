@@ -258,6 +258,23 @@ def test_state_tracks_changes_separately_and_restarts(tmp_path):
     assert result["validation"].new_mask.tolist() == [True, True]
 
 
+def test_rows_state_is_bounded_bloom_and_detects_new_rows(tmp_path):
+    state = RoundState(tmp_path)
+    bundle = SimpleNamespace(
+        ids=("a", "b"),
+        features=np.array([[1.0], [2.0]]),
+        targets=np.array([0.0, 1.0]),
+    )
+    first = track_rows(state, {"train": bundle})["train"]
+    second = track_rows(state, {"train": bundle})["train"]
+    assert first.new_mask.tolist() == [True, True]
+    assert second.new_mask.tolist() == [False, False]
+    payload = json.loads((tmp_path / "rows.json").read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "row-bloom-v1"
+    assert len(payload["train"]["bits"]) > 0
+    assert (tmp_path / "rows.json").stat().st_size < 6 * 1024 * 1024
+
+
 def test_configs_and_missing_trainer_are_explicit():
     config = load_config("configs/harness.member3.json")
     pipeline = build_pipeline(config, Gateway())

@@ -430,7 +430,7 @@ data/stages/<task>/
 
 ### 7.3 WorkspaceV2Source（官方适配器）
 
-官方 `contest_harness 1.0.4` 已明确 `contest.harness.workspace.v2` 协议，因此正式的
+官方 `contest_harness 1.0.5` 已明确 `contest.harness.workspace.v2` 协议，因此正式的
 平台适配器是 `zhixun_harness/sources.py::WorkspaceV2Source`：
 
 - 平台通过 stdin 的 `start` 帧驱动一轮，提供 `prompt`、`dataset_key`、`round_index`、
@@ -954,7 +954,7 @@ python -m pytest -q
 | 结束信号 | `rnd.finish()` + `round_ack` |
 | 超时/重试 | 由平台控制；SDK 侧只做本地校验 |
 | 结果写回 | `submit_candidate` + `save_state` + `finish` |
-| 资源预算 | `rnd.max_output_tokens`、`rnd.limits`；SDK 1.0.4 单候选/状态最多 64 文件、512 MiB |
+| 资源预算 | `rnd.max_output_tokens`、`rnd.limits`；SDK 1.0.5 单候选/状态最多 64 文件、512 MiB |
 | ack / 回执 | `finish` 返回 `round_ack`；候选返回 `artifact_id` 和验证摘要 |
 
 仍需向平台确认：`rnd.task` 中完整字段名、`rnd.limits` 的具体字节上限、真实宿主的
@@ -987,7 +987,7 @@ contest_submission.py                    # 官方 train/predict 入口
 app/harness.py                           # 复制到镜像 /app/harness.py
 pyproject.toml
 Dockerfile
-contest-harness-sdk-1.0.4.tar.gz
+contest-harness-sdk-1.0.5.tar.gz
 scripts/build_stages_a.py
 configs/harness.json
 configs/dev/a.json
@@ -1038,7 +1038,7 @@ README.md（更新目录结构与运行命令）
 
 ## 22. workspace.v2 对齐修订（2026-11-17）
 
-本节保留首次接入时的历史背景；SDK 1.0.4 的分块上传变更见第 23 节。
+本节保留首次接入时的历史背景；SDK 1.0.5 的分块上传变更见第 23 节。
 
 官方 `contest_harness 1.0.2` 下载包与本规格的差异，以及本次落地的处理：
 
@@ -1059,9 +1059,9 @@ README.md（更新目录结构与运行命令）
 - `app/harness.py` + `contest_submission.py`：官方入口与选手模块。
 - `Dockerfile`：Python 3.12 + 官方 SDK + 本包，非 root 运行。
 
-## 23. SDK 1.0.4 分块上传修订（2026-11-22）
+## 23. SDK 1.0.5 分块上传修订（2026-11-22）
 
-- 镜像安装 `contest-harness-sdk-1.0.4.tar.gz`，继续使用
+- 镜像安装 `contest-harness-sdk-1.0.5.tar.gz`，继续使用
   `contest.harness.workspace.v2` 协议。
 - 宿主必须在 `start.resource_limits.artifact_upload_protocol` 中声明
   `chunked-v1`；SDK 不再退回旧版单条消息内联上传。

@@ -14,19 +14,24 @@
 
 ## 当前系统现状
 
-更新时间：2026-11-27（全员问题修复，见 `docs/全员问题修复-1127.md`）。
+更新时间：2026-11-27（全员问题修复、SDK 1.0.5 与 champion–challenger 策略）。
 
 | 部分 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 官方 SDK | 已完成 | `contest_harness 1.0.4`，支持 `chunked-v1` 分块上传 |
+| 官方 SDK | 已完成 | `contest_harness 1.0.5`，支持 `chunked-v1` 分块上传 |
 | 成员 1：控制面 | 已完成 | `describe / train / predict`、数据适配、预算、状态、候选提交 |
 | 成员 2：漂移诊断 | 已完成 | 指标退化、PSI/KS、工况和输入范围变化诊断 |
-| 成员 3：模型决策 | 代码已完成 | 解析并严格校验 Qwen 动作与参数；平台真实调用尚待试运行 |
-| 成员 4：工业模型训练 | 已完成 | 从平台父检查点续训，支持微调和近期窗口重训 |
-| 成员 5：评测与门控 | 已完成 | 当前/候选模型对比、上线或保留、轮次审计记录 |
-| 本地验证 | 已通过 | `253 passed, 9 skipped`（镜像测试 9 项另跑） |
-| Linux/amd64 镜像 | 本地已构建 | WSL 内构建并通过 describe/predict/离线只读/SIGTERM 验收；平台导入待试运行 |
-| 平台正式评测 | 待进行 | 尚未执行真实 Qwen 调用、10 轮闭环和隐藏集评测 |
+| 成员 3：模型决策 | 已完成 | 平台真实 Qwen 调用已验证；严格解析和校验动作与参数 |
+| 成员 4：工业模型训练 | 已完成并优化 | champion–challenger、早停、近期/全量候选和父检查点续训 |
+| 成员 5：评测与门控 | 已完成 | 当前/候选模型对比、NASA 辅助门控、轮次审计记录 |
+| 本地验证 | 已通过 | `280 passed, 10 skipped`（镜像测试 10 项另跑） |
+| Linux/amd64 镜像 | 本地已构建 | SDK 1.0.5；通过 A/B/C 预测、训练轮、非 root、离线只读和 SIGTERM 验收 |
+| 平台试运行 | 已完成（策略修改前 v3） | A/B/C 各 10 轮，平台记录完整；该结果不是正式成绩 |
+| 最新策略平台试运行 | 待进行 | 1.0.5 + champion–challenger 版本尚未提交平台 |
+| 平台正式评测 | 待进行 | 最新版本完成试运行后再消耗正式评测次数 |
+
+工程稳定性修复（数据准备快速路径、Bloom 行状态、SwanLab 镜像依赖）见
+[`docs/engineering-fixes-1127.md`](docs/engineering-fixes-1127.md)。
 
 系统镜像默认使用 `configs/harness.full.json`，运行时链路为：
 
@@ -102,6 +107,22 @@ Artifact：model-2
 
 评价策略时不只看 Macro-F1 或 RMSE，还要看 CPU、Token、更新次数、最差批次、
 回滚能力和失败原因。Qwen 权重训练属于后续增强项，不应优先于完整平台实验。
+
+### 当前 champion–challenger 策略
+
+成员 4 当前使用预算受限的 champion–challenger 策略：
+
+- 没有新训练数据且指标稳定时，默认保留冠军模型；
+- B 连续稳定后，在剩余预算充足时允许一次 `1 candidate x 1 epoch` 的低成本探测；
+- 明显漂移时才扩大候选搜索；
+- 同一数据变换的短候选若已被长候选覆盖，不再重复训练；
+- 每个长候选按验证集早停，避免无效 epoch；
+- C 的周期探测默认关闭，并把 NASA 非对称评分纳入本地辅助门控；
+- C 候选只用当前训练集重拟合输入标准化统计量，再续训最多 8 epoch。
+
+策略设计、回滚条件和当前 C 漂移流对照见
+[`docs/strategy-optimization-1127.md`](docs/strategy-optimization-1127.md)。
+这些是本地对照结果，不是正式平台成绩。
 
 ## 开发环境基线
 
@@ -257,7 +278,7 @@ flowchart LR
 ├── scripts/               # 启动、验证、打包脚本
 ├── tests/                 # 单元测试、协议测试与夹具
 ├── docs/                  # 接口契约、参考实现与规格
-├── contest-harness-sdk-1.0.4.tar.gz  # 官方 SDK 归档
+├── contest-harness-sdk-1.0.5.tar.gz  # 官方 SDK 归档
 ├── data/                  # 官方数据，不提交到 Git
 ├── Dockerfile
 └── pyproject.toml
@@ -311,7 +332,7 @@ where.exe python
 
 ```bash
 python -m pip install -e ".[dev]"
-python -m pip install ./contest-harness-sdk-1.0.4.tar.gz
+python -m pip install ./contest-harness-sdk-1.0.5.tar.gz
 ```
 
 本地单元测试不需要先登录 PyTRiO 或 SwanLab，也不会访问隐藏数据。
@@ -369,7 +390,7 @@ python app/harness.py describe
 应输出：
 
 ```json
-{"protocol":"contest.harness.workspace.v2","model_access":"host_gateway_rpc","sdk":"contest_harness","sdk_version":"1.0.4","tasks":["classification","regression"]}
+{"protocol":"contest.harness.workspace.v2","model_access":"host_gateway_rpc","sdk":"contest_harness","sdk_version":"1.0.5","tasks":["classification","regression"]}
 ```
 
 `train` 不能直接在空终端启动；平台必须通过 stdin 注入本轮 `start` 帧。
@@ -386,7 +407,8 @@ trio login
 ```
 
 API Key 只能保存在平台密钥栏或本地环境变量中，禁止提交、截图或发送给他人。
-镜像中的轮次记录默认离线；设置 `SWANLAB_MODE=online` 才会尝试上传 SwanLab。
+镜像已经包含 SwanLab；轮次记录默认离线，设置 `SWANLAB_MODE=online` 并提供
+`SWANLAB_API_KEY` 才会尝试上传 SwanLab。
 
 ## 团队协作
 
@@ -725,7 +747,7 @@ baseline，基于其中的训练代码和初始检查点进行修改与续训。
 请勿从头训练新模型冒充续训，也不要仅更改模型文件后缀、附带未使用的父检查
 点或补造数据元信息来通过校验。镜像应包含实际运行所需的代码和配置，并提供
 独立预测入口；当前模型产物须符合 `checkpoint.npz` 交付约定。旧版 SDK
-公告写的是 64 MiB；SDK 1.0.4 改为分块上传，单候选/状态最多 64 个文件、
+公告写的是 64 MiB；SDK 1.0.5 改为分块上传，单候选/状态最多 64 个文件、
 合计 512 MiB，具体以本轮 `rnd.limits` 为准。
 
 修正后请上传新镜像、保存新提交版本并重新发起试运行。请勿反复重跑尚未修复
@@ -737,12 +759,12 @@ baseline，基于其中的训练代码和初始检查点进行修改与续训。
 
 ## 选手 Harness SDK 接入
 
-> SDK 版本：`contest_harness 1.0.4` · 协议：`contest.harness.workspace.v2` ·
+> SDK 版本：`contest_harness 1.0.5` · 协议：`contest.harness.workspace.v2` ·
 > 提示词版本：`industrial-workspace-flexible-v3`
-> 本地资料：`contest-harness-sdk-1.0.4.tar.gz`（SDK 包，内含
+> 本地资料：`contest-harness-sdk-1.0.5.tar.gz`（SDK 包，内含
 > `HARNESS_SDK.md` 使用说明）
 
-镜像只安装并携带SDK 1.0.4。设计文档中出现的1.0.2内容仅用于记录升级历史，
+镜像只安装并携带SDK 1.0.5。设计文档中出现的1.0.2内容仅用于记录升级历史，
 不是运行时依赖；仓库也不会保留1.0.2 Windows下载残留。
 
 SDK 负责读取平台提示、公开数据和父模型，并让平台调用我们的镜像；评分、
@@ -868,7 +890,7 @@ with rnd.transport() as transport:
 `rnd.history()` 返回本数据集已完成的检查点记录，结束本轮时引用实际读过的
 `id`；记录可以是空的。
 
-候选从 `/workspace` 下的新目录提交，目录里只放普通文件。SDK 1.0.4 使用
+候选从 `/workspace` 下的新目录提交，目录里只放普通文件。SDK 1.0.5 使用
 `chunked-v1` 分块上传：单个候选或状态最多 64 个文件、合计 512 MiB；每轮
 候选累计 1 GiB、状态累计 512 MiB，具体以 `rnd.limits` 为准。至少声明一个
 检查点文件：
@@ -1044,7 +1066,7 @@ python -m zhixun_harness.orchestrator \
 本地验证 `describe` 与 `predict`：
 
 ```bash
-pip install contest-harness-sdk-1.0.4.tar.gz
+pip install contest-harness-sdk-1.0.5.tar.gz
 PYTHONPATH=. python app/harness.py describe
 printf '%s\n' '{"task":"classification","inputs":{"x":1}}' \
   | PYTHONPATH=. python app/harness.py predict
@@ -1093,7 +1115,7 @@ docker run --rm zhixun-harness:0.1.0 describe
 - 本地测试使用模拟宿主返回 Qwen 决策；真实平台模型调用和回执尚未验收。
 - 隐藏集、正式评分细节和 10 轮稳定性仍以测评平台为准。
 - 镜像须用 `docker save` 导出为单个未压缩 Linux/amd64 tar。模型产物须符合
-  `checkpoint.npz` 交付约定；SDK 1.0.4 的分块上传上限以 `rnd.limits` 为准。
+  `checkpoint.npz` 交付约定；SDK 1.0.5 的分块上传上限以 `rnd.limits` 为准。
 - 平台沙箱当前约 2 CPU、4 GiB 内存；成员 4 的成本估算仍需用真实运行数据
   标定。
 - SwanLab 在线上传需要本地或平台密钥；没有配置时只写本地 JSON，不应把本地

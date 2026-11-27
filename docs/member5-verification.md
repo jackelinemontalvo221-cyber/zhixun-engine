@@ -69,7 +69,7 @@ Python 3.12.10
 pytest 9.2.0
 NumPy 1.26.4
 PyTRIO 0.2.10
-contest_harness 1.0.4
+contest_harness 1.0.5
 SwanLab 0.10.5
 ```
 
