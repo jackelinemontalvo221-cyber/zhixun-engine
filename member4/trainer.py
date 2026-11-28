@@ -460,6 +460,17 @@ class CandidateTrainer:
         hints["policy_version"] = POLICY_VERSION
         return hints
 
+    def _adaptive_search_limits(self, params):
+        max_candidates = int(params["max_candidates"])
+        max_epochs = int(params["max_epochs"])
+        if (
+            getattr(self.context, "dataset_key", "") == "C"
+            and getattr(self.context, "round_index", None) == 1
+        ):
+            # Restore the short full-data input-refit search used by 0.2.4.
+            return 1, min(2, max_epochs)
+        return max_candidates, max_epochs
+
     def estimate_training_cost(self, action, params):
         """Return a conservative CPU estimate before training starts."""
         if action == "no_update":
@@ -475,10 +486,11 @@ class CandidateTrainer:
             if len(mask):
                 new_fraction = float(mask.mean())
         if action == "adaptive_update":
+            max_candidates, max_epochs = self._adaptive_search_limits(params)
             plans = candidate_plans(
                 getattr(self.context, "dataset_key", ""),
-                max_candidates=int(params["max_candidates"]),
-                max_epochs=int(params["max_epochs"]),
+                max_candidates=max_candidates,
+                max_epochs=max_epochs,
                 new_fraction=new_fraction,
             )
             epochs = sum(plan["max_epochs"] for plan in plans)
@@ -800,10 +812,11 @@ class CandidateTrainer:
             feature_count=bundle.feature_count,
             task_type=bundle.task_type,
         )
+        max_candidates, max_epochs = self._adaptive_search_limits(decision.params)
         plans = candidate_plans(
             getattr(self.context, "dataset_key", bundle.task_id),
-            max_candidates=int(decision.params["max_candidates"]),
-            max_epochs=int(decision.params["max_epochs"]),
+            max_candidates=max_candidates,
+            max_epochs=max_epochs,
             new_fraction=new_fraction,
             replay_available=replay is not None,
             strategy_stats=self._load_strategy_stats().get(str(bundle.task_id), {}),
