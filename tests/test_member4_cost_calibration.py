@@ -58,7 +58,7 @@ def test_record_cost_units_averages_measurements(tmp_path):
     assert stats["B"]["cpu_seconds_per_row_epoch"] == pytest.approx((5e-5 + 1e-4) / 2)
 
 
-def test_real_training_writes_cost_stats(tmp_path):
+def test_real_training_writes_cost_stats(tmp_path, monkeypatch):
     from tests.test_member4_trainer import (
         budget,
         load_case,
@@ -69,6 +69,11 @@ def test_real_training_writes_cost_stats(tmp_path):
     model, bundle, active, context, _ = load_case(
         "A", "cpu-a-guide-20261110-v1", state_root=tmp_path
     )
+    # Small fixtures can finish within one Windows CPU-clock tick. A zero
+    # measurement is correctly discarded; use a known nonzero duration here
+    # so this test checks persistence rather than the host timer resolution.
+    ticks = iter((10.0, 10.1))
+    monkeypatch.setattr("member4.trainer.time.process_time", lambda: next(ticks))
     candidate = build_trainer(context).train_candidate(
         bundle,
         make_decision(seed=model.meta["seed"]),

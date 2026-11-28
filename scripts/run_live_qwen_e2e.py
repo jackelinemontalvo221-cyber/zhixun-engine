@@ -45,7 +45,7 @@ def _history_entry(record: dict, decision) -> dict | None:
     if decision is None or "record_id" not in record:
         return None          # a failed round leaves no history entry, like on the platform
     return {
-        "id": record["record_id"],
+        "id": record.get("record_id") or f"round-{record.get('round_index', '?')}",
         "round_index": record["round_index"],
         "final_action": record["final_action"],
         "configuration": decision.params,
@@ -61,10 +61,76 @@ def _candidate_upload(host):
     return None
 
 
-def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict) -> dict:
+def write_platform_rows(dataset_key: str, destination: Path, *,
+                        train_rows=None, validation_rows=None) -> Path:
+    """Write the public projection with only the fields the platform guarantees.
+
+    The platform ``/data/*.jsonl`` rows carry ``id``, ``inputs`` and ``answer``;
+    ``meta`` exists only in the development package.  Removing it makes the
+    local run take the same global-tail recent-window fallback as the platform.
+    ``train_rows`` / ``validation_rows`` let the caller write a per-round stream.
+    """
+
+    destination.mkdir(parents=True, exist_ok=True)
+    provided = {"train": train_rows, "validation": validation_rows}
+
+    def write_row(writer, row):
+        projection = {"id": row["id"], "inputs": row["inputs"]}
+        if "answer" in row:
+            projection["answer"] = row["answer"]
+        writer.write(json.dumps(projection, ensure_ascii=False) + "\n")
+
+    for name in ("train", "validation"):
+        target = destination / f"{name}.jsonl"
+        rows = provided[name]
+        with target.open("w", encoding="utf-8") as writer:
+            if rows is None:
+                source = PACKAGES[dataset_key] / "public" / f"{name}.jsonl"
+                with source.open(encoding="utf-8") as reader:
+                    for line in reader:
+                        if line.strip():
+                            write_row(writer, json.loads(line))
+            else:
+                for row in rows:
+                    write_row(writer, row)
+    return destination
+
+
+def _public_rows(dataset_key: str, name: str) -> list[dict]:
+    source = PACKAGES[dataset_key] / "public" / f"{name}.jsonl"
+    with source.open(encoding="utf-8") as reader:
+        return [json.loads(line) for line in reader if line.strip()]
+
+
+def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict,
+                *, strip_meta: bool = False, stream_new_fraction: float = 0.0) -> dict:
     dataset_dir = output / dataset_key
     parent_dir = dataset_dir / "parent"
     parent_dir.mkdir(parents=True)
+    rows_dir = None
+    base_rows = None
+    stream_rows = []
+    validation_rows = None
+    stream_chunk = 0
+    if strip_meta:
+        rows_dir = dataset_dir / "platform-rows"
+        train_rows = _public_rows(dataset_key, "train")
+        validation_rows = _public_rows(dataset_key, "validation")
+        if stream_new_fraction > 0:
+            stream_chunk = max(1, int(len(train_rows) * stream_new_fraction))
+            base_count = len(train_rows) - stream_chunk * max(0, rounds - 1)
+            if base_count <= 0:
+                raise ValueError("stream-new-fraction leaves no base training rows")
+            base_rows = train_rows[:base_count]
+            stream_rows = train_rows[base_count:]
+        else:
+            base_rows = train_rows
+        write_platform_rows(
+            dataset_key,
+            rows_dir,
+            train_rows=base_rows,
+            validation_rows=validation_rows,
+        )
     shutil.copyfile(PACKAGES[dataset_key] / "checkpoint.npz", parent_dir / "checkpoint.npz")
     os.environ["CONTEST_WORK"] = str(dataset_dir / "work")
     state_path = None
@@ -79,6 +145,19 @@ def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict)
     try:
         for index in range(1, rounds + 1):
             start = build_start(index, dataset_key=dataset_key)
+            if rows_dir is not None:
+                if stream_rows:
+                    round_rows = base_rows + stream_rows[: stream_chunk * (index - 1)]
+                    write_platform_rows(
+                        dataset_key,
+                        rows_dir,
+                        train_rows=round_rows,
+                        validation_rows=validation_rows,
+                    )
+                start["task_contract"]["public_projection"] = {
+                    "train_path": str(rows_dir / "train.jsonl"),
+                    "validation_path": str(rows_dir / "validation.jsonl"),
+                }
             checkpoint = parent_dir / "checkpoint.npz"
             digest = _sha256(checkpoint)
             start["run_id"] = f"live-{dataset_key}-{output.name}"
@@ -161,6 +240,7 @@ def run_dataset(dataset_key: str, rounds: int, output: Path, gateway_args: dict)
         "failed_rounds": sum(item["final_action"] == "failed" for item in summaries),
         "records": str(dataset_dir / "work" / "records"),
         "state": str(state_path),
+        "platform_rows": bool(strip_meta),
         "rounds_detail": summaries,
     }
 
@@ -184,6 +264,18 @@ def main(argv=None) -> int:
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument(
+        "--strip-meta",
+        action="store_true",
+        help="remove meta from public rows to mimic the platform projection",
+    )
+    parser.add_argument(
+        "--stream-new-fraction",
+        type=float,
+        default=0.0,
+        help="append this fraction of the public train rows as new data each round "
+             "(requires --strip-meta; 0.02 = 2%% per round)",
+    )
     parser.add_argument("--output")
     parser.add_argument("--skip-preflight", action="store_true",
                         help="do not send the one-line connectivity check before the run")
@@ -192,6 +284,10 @@ def main(argv=None) -> int:
         parser.error("--rounds must be in 1..10")
     if not 1 <= args.max_tokens <= 512:
         parser.error("--max-tokens must be in 1..512")
+    if not 0.0 <= args.stream_new_fraction <= 0.2:
+        parser.error("--stream-new-fraction must be in 0..0.2")
+    if args.stream_new_fraction > 0 and not args.strip_meta:
+        parser.error("--stream-new-fraction requires --strip-meta")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = Path(args.output) if args.output else ROOT / "artifacts" / f"live-qwen-{stamp}"
@@ -218,7 +314,14 @@ def main(argv=None) -> int:
     os.environ["ZHIXUN_RUN_PROVENANCE"] = "local-live-qwen"
     try:
         summaries = [
-            run_dataset(dataset, args.rounds, output, gateway_args)
+            run_dataset(
+                dataset,
+                args.rounds,
+                output,
+                gateway_args,
+                strip_meta=args.strip_meta,
+                stream_new_fraction=args.stream_new_fraction,
+            )
             for dataset in args.datasets
         ]
     except Exception as exc:
@@ -227,6 +330,8 @@ def main(argv=None) -> int:
             "official": False,
             "status": "failed",
             "model": args.model,
+            "platform_rows": args.strip_meta,
+            "stream_new_fraction": args.stream_new_fraction,
             "output": str(output),
             "error_type": type(exc).__name__,
             "error": str(exc)[:2000],
@@ -249,6 +354,8 @@ def main(argv=None) -> int:
     summary_path = output / "summary.json"
     summary_path.write_text(
         json.dumps({"kind": "local-live-qwen", "official": False, "model": args.model,
+                    "platform_rows": args.strip_meta,
+                    "stream_new_fraction": args.stream_new_fraction,
                     "output": str(output), "datasets": summaries},
                    ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",

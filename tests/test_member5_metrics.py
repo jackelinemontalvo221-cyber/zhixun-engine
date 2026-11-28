@@ -57,3 +57,39 @@ def test_nasa_score_penalizes_overprediction_more():
     over = nasa_asymmetric_score([10.0, 10.0], [11.0, 11.0])
     under = nasa_asymmetric_score([10.0, 10.0], [9.0, 9.0])
     assert over > under >= 0
+
+def test_nasa_score_is_asymmetric_and_penalizes_late_predictions():
+    from member5.metrics import nasa_asymmetric_score
+
+    assert nasa_asymmetric_score([100.0], [100.0]) == pytest.approx(0.0)
+    early = nasa_asymmetric_score([100.0], [90.0])
+    late = nasa_asymmetric_score([100.0], [110.0])
+    assert early == pytest.approx(np.exp(10 / 13) - 1)
+    assert late == pytest.approx(np.exp(1.0) - 1)
+    assert late > early
+
+
+def test_regression_metrics_do_not_include_nasa_by_default():
+    metrics, _ = regression_metrics([100.0], [110.0])
+    assert "nasa_score" not in metrics
+
+
+def test_nasa_score_is_a_mean_over_samples():
+    from member5.metrics import nasa_asymmetric_score
+
+    assert nasa_asymmetric_score([10.0, 10.0], [11.0, 11.0]) == pytest.approx(
+        np.expm1(0.1)
+    )
+
+
+def test_c_evaluation_reports_nasa_score_but_b_does_not():
+    from member5.evaluator import evaluate_checkpoint
+    from tests.test_member4_trainer import PACKAGES, load_case
+
+    for key, package in (("B", PACKAGES[1]), ("C", PACKAGES[2])):
+        model, bundle, active, context, path = load_case(key, package[1])
+        metrics = evaluate_checkpoint(path, context.eval_bundle)
+        if key == "C":
+            assert metrics["nasa_score"] >= 0
+        else:
+            assert "nasa_score" not in metrics

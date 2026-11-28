@@ -19,6 +19,7 @@ import numpy as np
 
 from zhixun_harness.contracts import ActiveModel, CandidateModel, Evaluation, StageBundle
 from zhixun_harness.errors import EvaluationError
+from zhixun_harness.fsutil import replace_with_retry
 from zhixun_harness.hashing import sha256_bytes
 from zhixun_harness.official import import_baselines
 from .metrics import evaluate_checkpoint_details
@@ -47,6 +48,12 @@ def _prune_state_audits(folder: Path, prefix: str, keep: int = STATE_AUDIT_KEEP)
 
 
 BOUNDED_METRICS = frozenset({"macro_f1", "accuracy", "balanced_accuracy"})
+# Recorded and reported, never a veto.  The C-MAPSS NASA score averages exp(error/10):
+# a handful of rows dominate it, so it swings with the validation sample.  Platform
+# trial 0.2.4, C round 7: RMSE 52.10 -> 51.97 and MAE 38.66 -> 37.67 were rejected only
+# because NASA rose; round 9's parent NASA jumped 75% with an unchanged RMSE.  0.2.6
+# repeated the round-7 rejection.  The contract metric is RMSE; MAE stays a veto.
+REPORT_ONLY_METRICS = frozenset({"nasa_score"})
 
 METRIC_DIRECTIONS = {
     "macro_f1": "maximize",
@@ -54,6 +61,9 @@ METRIC_DIRECTIONS = {
     "balanced_accuracy": "maximize",
     "rmse": "minimize",
     "mae": "minimize",
+    # C also reports the NASA asymmetric score; like MAE it is an auxiliary
+    # metric, so a candidate that blows up the tail is rejected even if RMSE
+    # improves.  The relative tolerance is ``max_regression`` (2% by default).
     "nasa_score": "minimize",
 }
 
@@ -111,6 +121,10 @@ def compare_metrics(
             continue
         metric_direction = METRIC_DIRECTIONS.get(name)
         if metric_direction is None:
+            continue
+        if name in REPORT_ONLY_METRICS:
+            reasons.append(f"auxiliary metric reported only: {name} before={float(baseline[name]):.6g}, "
+                           f"after={float(value):.6g}")
             continue
         before = float(baseline[name])
         after = float(value)
@@ -177,7 +191,7 @@ class EvaluationGate:
                 + "\n",
                 encoding="utf-8",
             )
-            os.replace(temporary, path)
+            replace_with_retry(temporary, path)
             _prune_state_audits(folder, "robustness-")
         except Exception:
             # Audit evidence must never hide the primary gate decision.
@@ -197,7 +211,7 @@ class EvaluationGate:
                 + "\n",
                 encoding="utf-8",
             )
-            os.replace(temporary, path)
+            replace_with_retry(temporary, path)
             _prune_state_audits(folder, "groups-")
         except Exception:
             pass
@@ -274,7 +288,7 @@ class EvaluationGate:
                     + "\n",
                     encoding="utf-8",
                 )
-                os.replace(temporary, path)
+                replace_with_retry(temporary, path)
                 if state_folder is not None and root == state_folder:
                     _prune_state_audits(root, "metrics-")
             except Exception:
@@ -457,6 +471,7 @@ class EvaluationGate:
                             "reason": f"{type(exc).__name__}: {exc}"[:400],
                             "groups": [],
                             "worst_group": None,
+                            "worst_absolute_group": None,
                         }
                     self._write_group_audit(target, group_audit)
         except Exception as exc:

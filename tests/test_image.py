@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_round_protocol import PACKAGES, Host, build_start
+from tests.test_round_protocol import PACKAGES, Host, artifact_receipt, build_start
 
 IMAGE = os.environ.get("ZH_IMAGE")
 pytestmark = pytest.mark.skipif(not IMAGE, reason="set ZH_IMAGE to an image to run acceptance checks")
@@ -95,6 +95,136 @@ def test_full_round_offline_read_only_non_root(key):
     states = host.uploaded("state")
     assert states and any(path.endswith("round-log.json") for path in states[-1])
     assert len(states[-1]) <= 64
+
+
+class ProbeHost(Host):
+    """Choose the bounded probe exactly when the embedded policy allows it."""
+
+    def reply(self, frame: dict) -> dict:
+        if frame.get("type") == "model_request":
+            try:
+                evidence = json.loads(frame["messages"][-1]["content"])
+            except (KeyError, IndexError, TypeError, ValueError):
+                evidence = {}
+            if evidence.get("probe_due") is True:
+                self.model_content = json.dumps({
+                    "action": "adaptive_update",
+                    "params": {
+                        "max_candidates": 1,
+                        "max_epochs": 1,
+                        "seed": evidence.get("model_seed") or 42,
+                    },
+                    "rationale": "稳定冠军探测到期，执行有界候选。",
+                }, ensure_ascii=False)
+            else:
+                self.model_content = json.dumps({
+                    "action": "no_update",
+                    "params": {},
+                    "rationale": "保留父模型。",
+                }, ensure_ascii=False)
+        return super().reply(frame)
+
+
+def _materialize_state(host: Host, destination: Path) -> None:
+    states = host.uploaded("state")
+    assert states
+    for relative, payload in states[-1].items():
+        path = destination / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+
+@pytest.mark.parametrize("key", ["B", "C"])
+def test_b_c_stable_probes_are_executed_across_rounds(tmp_path, key):
+    package = PACKAGES[key]
+    parent_dir = tmp_path / key / "parent"
+    parent_dir.mkdir(parents=True)
+    parent_checkpoint = parent_dir / "checkpoint.npz"
+    parent_checkpoint.write_bytes((package / "checkpoint.npz").read_bytes())
+    parent_id = "parent-1"
+    receipt, payloads = artifact_receipt(parent_id, parent_checkpoint)
+    artifacts = [receipt]
+    history = []
+    state_dir = None
+    records = []
+
+    for round_index in range(1, 6):
+        start = build_start(round_index, key)
+        digest = "sha256:" + __import__("hashlib").sha256(parent_checkpoint.read_bytes()).hexdigest()
+        start["task_contract"]["public_projection"] = {
+            "train_path": "/data/train.jsonl",
+            "validation_path": "/data/validation.jsonl",
+        }
+        start["parent_checkpoint_sha256"] = digest
+        start["parent_artifact"]["artifact_id"] = parent_id
+        start["parent_artifact"]["files"] = [{
+            "path": "checkpoint.npz",
+            "sha256": digest,
+            "size_bytes": parent_checkpoint.stat().st_size,
+        }]
+        start["artifacts"] = [dict(item) for item in artifacts]
+        if state_dir is not None:
+            start["state_path"] = "/state"
+
+        command = [
+            "docker", "run", "--rm", "-i", *LOCKED,
+            "-v", f"{package / 'public'}:/data:ro",
+            "-v", f"{parent_checkpoint}:/previous/checkpoint.npz:ro",
+        ]
+        if state_dir is not None:
+            command += ["-v", f"{state_dir}:/state:ro"]
+        command += [IMAGE, "train"]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        host = ProbeHost(start, history=history, artifact_payloads=payloads,
+                         call_id=f"probe-{key}-{round_index}")
+        host.serve(process)
+        process.wait(timeout=900)
+        if host.failure:
+            raise host.failure
+        assert process.returncode == 0, process.stderr.read()
+        record = host.record
+        assert record is not None
+        records.append(record)
+        evidence = record["configuration"]["evidence"]
+        final_action = evidence["final_action"]
+        history.append({
+            "id": record.get("record_id", f"{key}-round-{round_index}"),
+            "round_index": round_index,
+            "final_action": final_action,
+            "reason": record.get("reason", ""),
+        })
+
+        selected = record["selected_artifact_id"]
+        if final_action == "promote":
+            candidates = host.uploaded("candidate")
+            assert candidates
+            parent_checkpoint.write_bytes(candidates[-1]["checkpoint.npz"])
+            parent_id = selected
+            receipt, payloads = artifact_receipt(parent_id, parent_checkpoint)
+            artifacts.append(receipt)
+        elif final_action == "rollback":
+            parent_checkpoint.write_bytes(payloads[selected]["checkpoint.npz"])
+            parent_id = selected
+
+        state_dir = tmp_path / key / f"state-{round_index}"
+        _materialize_state(host, state_dir)
+
+    probes = [
+        (index + 1, record)
+        for index, record in enumerate(records)
+        if record["configuration"]["evidence"].get("probe_executed") is True
+    ]
+    assert probes, f"{key} did not exercise the stable probe path"
+    assert probes[0][0] in {4, 5}
+    params = probes[0][1]["configuration"]
+    assert params["max_candidates"] == params["max_epochs"] == 1
 
 
 def test_sigterm_stops_the_container_promptly():

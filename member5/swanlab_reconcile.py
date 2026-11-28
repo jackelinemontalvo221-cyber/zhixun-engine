@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from zhixun_harness.fsutil import replace_with_retry
+
 from .audit import acceptance_packet
 
 
@@ -59,7 +61,7 @@ def reconcile_export(records_root: str | Path, manifest_path: str | Path) -> dic
             + "\n",
             encoding="utf-8",
         )
-        temporary.replace(path)
+        replace_with_retry(temporary, path)
         updated.append({"record_id": record_id, "path": str(path), "url": url})
     result = {
         "schema_version": RECONCILE_SCHEMA,

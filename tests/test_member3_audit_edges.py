@@ -52,7 +52,7 @@ def test_prompt_fingerprint_and_diagnosis_are_saved(tmp_path, diagnosis):
     record = decider.last_record
     assert record['prompt_version'] == PROMPT_VERSION
     assert record['prompt_sha256'] == hashlib.sha256(record['messages'][0]['content'].encode('utf-8')).hexdigest()
-    assert record['prompt_sha256'] == 'b27dfec273aafc53f43b8a4a4a74c189b867bb8538dc9cd31ddb7fc8057da5b8'
+    assert record['prompt_sha256'] == 'd54ffa007fba1dca2f118edf0eef74a792f991d2b36b775569245f2127c8df73'
     assert record['diagnosis_id'] == diagnosis.diagnosis_id
 
 

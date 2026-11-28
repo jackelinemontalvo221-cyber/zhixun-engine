@@ -29,6 +29,38 @@ def test_commit_is_atomic_and_idempotent(tmp_path):
         store.close()
 
 
+def test_stage_commit_retries_transient_directory_replace(tmp_path, monkeypatch):
+    import os
+    import zhixun_harness.fsutil as fsutil_module
+
+    checkpoint = tmp_path / "checkpoint.npz"
+    checkpoint.write_bytes(b"initial")
+    store = ArtifactStore(tmp_path / "art", "run-retry")
+    try:
+        store.ensure_initial(checkpoint)
+        stage = bundle(stage_id="stage-retry")
+        txn = store.begin_stage(descriptor(), stage)
+        original = os.replace
+        calls = 0
+
+        def flaky_replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                error = OSError(13, "directory is temporarily busy")
+                error.winerror = 5
+                raise error
+            return original(source, destination)
+
+        monkeypatch.setattr(fsutil_module.os, "replace", flaky_replace)
+        assert txn.commit() == "committed"
+        assert calls == 2
+        assert txn.final.is_dir()
+        assert store.read_manifest(txn.final)["canonical_sha256"] == stage.canonical_sha256
+    finally:
+        store.close()
+
+
 def test_conflicting_content_is_fatal(tmp_path):
     checkpoint = tmp_path / "checkpoint.npz"
     checkpoint.write_bytes(b"initial")

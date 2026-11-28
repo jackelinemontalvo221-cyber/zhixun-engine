@@ -36,5 +36,23 @@ def test_training_data_uses_group_recent_window():
         normalize_stage(raw_stage(rows, labels=labels), profile()),
         "round-1",
     )
-    train_x, _train_y = CandidateTrainer()._training_data(stage, window_ratio=0.5)
+    train_x, _train_y = CandidateTrainer()._training_data(
+        stage, window_ratio=0.5, window_mode="group"
+    )
     assert train_x[:, 0].tolist() == [2.0, 3.0, 5.0, 6.0]
+
+
+def test_training_data_global_window_uses_tail():
+    rows = [(f"r{i}", {"a": float(i), "b": 0.0}) for i in range(1, 7)]
+    labels = [
+        {"id": f"r{i}", "answer": "x", "group": "b1" if i <= 3 else "b2"}
+        for i in range(1, 7)
+    ]
+    stage = bind_stage(
+        normalize_stage(raw_stage(rows, labels=labels), profile()),
+        "round-1",
+    )
+    train_x, _train_y = CandidateTrainer()._training_data(
+        stage, window_ratio=0.5, window_mode="global"
+    )
+    assert train_x[:, 0].tolist() == [4.0, 5.0, 6.0]

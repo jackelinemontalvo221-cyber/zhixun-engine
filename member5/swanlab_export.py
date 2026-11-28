@@ -25,6 +25,62 @@ def _numeric_metrics(prefix: str, metrics: dict, output: dict):
         output[f"{prefix}/{key}"] = float(value)
 
 
+def _best_epoch_number(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        digits = "".join(char for char in value if char.isdigit())
+        return float(digits) if digits else None
+    return None
+
+
+def _member4_fields(record: dict) -> tuple[dict, dict]:
+    """Training-side (member4) diagnostics worth publishing with the record."""
+    candidate = record.get("candidate") or {}
+    config = candidate.get("config") or {}
+    plan = config.get("selected_plan") or {}
+    trials = config.get("trials") or []
+    selected = next(
+        (trial for trial in trials if trial.get("name") == plan.get("name")), {}
+    )
+    metrics = {}
+    for key, value in (
+        ("candidates", config.get("max_candidates")),
+        ("max_epochs", config.get("max_epochs")),
+        ("new_rows_fraction", config.get("new_rows_fraction")),
+        ("replay_rows_used", config.get("replay_rows_used")),
+        ("replay_rows_saved", config.get("replay_rows_saved")),
+        ("learning_rate", config.get("learning_rate")),
+        ("window_ratio", plan.get("window_ratio") or selected.get("window_ratio")),
+        ("training_rows", selected.get("training_rows")),
+        ("requested_epochs", selected.get("requested_epochs")),
+        ("worst_group_delta", selected.get("worst_group_delta")),
+        ("selection_score", selected.get("selection_score")),
+        ("hidden", selected.get("hidden")),
+        ("pruned_keep", (selected.get("migration") or {}).get("keep")),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        metrics[f"member4/{key}"] = float(value)
+    best_epoch = _best_epoch_number(selected.get("best_epoch"))
+    if best_epoch is not None:
+        metrics["member4/best_epoch"] = best_epoch
+    transform = plan.get("transform") or {}
+    info = {
+        "member4_selected_plan": plan.get("name"),
+        "member4_plan_action": plan.get("action"),
+        "member4_window_ratio": plan.get("window_ratio"),
+        "member4_weighting": plan.get("weighting"),
+        "member4_swa": bool(plan.get("swa")),
+        "member4_anchor_lambda": plan.get("anchor_lambda"),
+        "member4_transform": transform.get("kind"),
+        "member4_transform_keep": transform.get("keep"),
+    }
+    return metrics, info
+
+
 def _experiment_name(record: dict) -> str:
     return (
         f"{record.get('dataset_key')}-{record.get('stage_id')}-"
@@ -96,6 +152,7 @@ def export_round_records(
             )
             continue
         try:
+            member4_metrics, member4_config = _member4_fields(record)
             run = swanlab.init(
                 mode="online",
                 public=True,
@@ -110,12 +167,14 @@ def export_round_records(
                     "action": record.get("decision", {}).get("action"),
                     "final_action": record.get("final_action"),
                     "selected_artifact_id": record.get("selected_artifact_id"),
+                    **member4_config,
                 },
             )
             metrics = {
                 "decision/promoted": int(record.get("final_action") == "promote"),
                 "decision/model_call_count": len(record.get("model_call_ids") or []),
                 "decision/history_count": len(record.get("history_ids") or []),
+                **member4_metrics,
             }
             record_metrics = record.get("metrics", {})
             _numeric_metrics("before", record_metrics.get("baseline") or {}, metrics)

@@ -81,3 +81,108 @@ def test_training_with_wrong_parent_seed_falls_back(tmp_path, diagnosis):
     assert decision.action == 'retrain_full'
     assert decision.params['seed'] == 42
     assert decider.last_record['status'] == 'fallback'
+
+
+def _stable_probe_diagnosis(diagnosis, *, cooldown=0):
+    notes = json.loads(diagnosis.notes)
+    notes.update(
+        severity="none",
+        current=0.8,
+        reference=0.8,
+        perf_drop=0.0,
+        new_fraction=0.0,
+        rows={"total": 1000, "new": 0, "new_known": True, "validation": 100},
+        probe_due=cooldown == 0,
+        probe_status={
+            "due": cooldown == 0,
+            "cooldown_remaining": cooldown,
+            "failed_probes": 2 if cooldown else 0,
+        },
+        update_hint={"action": "adaptive_update", "max_candidates": 1, "max_epochs": 1},
+        model_seed=42,
+    )
+    return replace(diagnosis, recommendation="finetune", notes=json.dumps(notes))
+
+
+def test_probe_size_is_enforced_at_decision_validation(tmp_path, diagnosis):
+    probe = _stable_probe_diagnosis(diagnosis)
+    oversized = json.dumps({
+        "action": "adaptive_update",
+        "params": {"max_candidates": 2, "max_epochs": 8, "seed": 42},
+        "rationale": "尝试扩大探测。",
+    })
+    gateway = Gateway(oversized)
+    decider, budget = setup_decider(tmp_path, gateway)
+    decision = decider.decide(probe, [], budget)
+    assert decision.action == "adaptive_update"
+    assert decision.params == {"max_candidates": 1, "max_epochs": 1, "seed": 42}
+    assert decider.last_record["status"] == "fallback"
+    evidence = json.loads(gateway.calls[0][0][1]["content"])
+    assert evidence["allowed_actions"] == ["adaptive_update", "no_update"]
+    assert evidence["parameter_limits"]["max_candidates"] == [1, 1]
+    assert evidence["parameter_limits"]["max_epochs"] == [1, 1]
+
+
+def test_probe_cooldown_removes_training_actions(tmp_path, diagnosis):
+    cooling = _stable_probe_diagnosis(diagnosis, cooldown=8)
+    reply = json.dumps({
+        "action": "finetune",
+        "params": {"epochs": 3, "seed": 42},
+        "rationale": "冷却期尝试训练。",
+    })
+    gateway = Gateway(reply)
+    decider, budget = setup_decider(tmp_path, gateway)
+    decision = decider.decide(cooling, [], budget)
+    assert decision.action == "no_update"
+    assert decider.last_record["status"] == "fallback"
+    evidence = json.loads(gateway.calls[0][0][1]["content"])
+    assert evidence["allowed_actions"] == ["no_update"]
+
+
+@pytest.mark.parametrize("used_cpu", [0, 76])
+def test_stable_idle_without_due_probe_removes_training_actions(
+    tmp_path, diagnosis, used_cpu
+):
+    stable = _stable_probe_diagnosis(diagnosis)
+    notes = json.loads(stable.notes)
+    notes.update(
+        probe_due=False,
+        probe_status={
+            "due": False,
+            "cooldown_remaining": 0,
+            "failed_probes": 0,
+            "reason": "insufficient CPU budget for probe",
+        },
+    )
+    stable = replace(stable, recommendation="no_update", notes=json.dumps(notes))
+    reply = json.dumps({
+        "action": "adaptive_update",
+        "params": {"max_candidates": 2, "max_epochs": 8, "seed": 42},
+        "rationale": "CPU 不足时扩大训练。",
+    })
+    gateway = Gateway(reply)
+    decider, budget = setup_decider(tmp_path, gateway)
+    budget.record_usage(cpu_seconds=used_cpu)
+    decision = decider.decide(stable, [], budget)
+    assert decision.action == "no_update"
+    assert decider.last_record["status"] == "fallback"
+    evidence = json.loads(gateway.calls[0][0][1]["content"])
+    assert evidence["allowed_actions"] == ["no_update"]
+
+
+def test_probe_fallback_preserves_parent_seed_zero(tmp_path, diagnosis):
+    probe = _stable_probe_diagnosis(diagnosis)
+    notes = json.loads(probe.notes)
+    notes["model_seed"] = 0
+    probe = replace(probe, notes=json.dumps(notes))
+    oversized = json.dumps({
+        "action": "adaptive_update",
+        "params": {"max_candidates": 2, "max_epochs": 8, "seed": 0},
+        "rationale": "触发有界回退。",
+    })
+    gateway = Gateway(oversized)
+    decider, budget = setup_decider(tmp_path, gateway)
+    decision = decider.decide(probe, [], budget)
+    assert decision.action == "adaptive_update"
+    assert decision.params == {"max_candidates": 1, "max_epochs": 1, "seed": 0}
+    assert decider.last_record["status"] == "fallback"

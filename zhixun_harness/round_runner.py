@@ -106,6 +106,7 @@ PRUNABLE_STATE = (
     "members/training/latest.json",
     "members/training/replay.npz",
     "rows.json",        # last resort: losing it only makes every row look new once
+    "rows.npz",
 )
 STATE_FILE_BUDGET = MAX_UPLOAD_FILES - 4
 
@@ -354,6 +355,14 @@ def _round_summary(rnd, diagnosis, decision, final_action, current, evaluation, 
         "drift_type": getattr(diagnosis, "drift_type", None),
         "severity": notes.get("severity"),
         "metric": notes.get("metric"),
+        "rows": notes.get("rows"),
+        "probe_due": bool(notes.get("probe_due", False)),
+        "probe_executed": bool(
+            notes.get("probe_due", False)
+            and getattr(decision, "action", None) == "adaptive_update"
+            and candidate is not None
+        ),
+        "stable_rounds": notes.get("stable_rounds", 0),
         "parent_metrics": {k: round(float(v), 6) for k, v in dict(current or {}).items()},
         "parent_artifact_id": str(rnd.parent.artifact_id),
     }
@@ -528,8 +537,8 @@ def _run(run, pipeline, evaluator) -> dict:
                                lineage=lineage,
                                # from the start of train(), so loading and parsing the
                                # data counts against the wall clock
-                               started_monotonic=min(run.started, round_started_monotonic),
-                               round_log=list(state.read("round-log.json", []) or [])[-8:])
+                               round_log=list(state.read("round-log.json", []) or [])[-ROUND_LOG_LIMIT:],
+                               started_monotonic=min(run.started, round_started_monotonic))
         run.context = context
         pipeline.bind_round(context)
         if hasattr(evaluator, "bind_round"):

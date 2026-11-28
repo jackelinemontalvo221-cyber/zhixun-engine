@@ -126,17 +126,21 @@ def test_error_metric_tolerance_is_relative():
     assert decision == "rollback" and "relative" in reasons[-1]
 
 
-def test_nasa_regression_rejects_a_candidate_that_only_improves_rmse():
+def test_nasa_score_is_reported_but_does_not_veto():
+    """Platform trials 0.2.4 and 0.2.6, C round 7: RMSE and MAE both improved and the
+    candidate was rejected only because the outlier-dominated NASA score rose."""
     decision, _, reasons = compare_metrics(
-        {"rmse": 40.0, "nasa_score": 100.0},
-        {"rmse": 38.0, "nasa_score": 120.0},
-        metric_name="rmse",
-        direction="minimize",
-        min_delta=0.001,
-        max_regression=0.02,
-    )
+        {"rmse": 40.0, "mae": 20.0, "nasa_score": 1.0e9},
+        {"rmse": 38.0, "mae": 19.5, "nasa_score": 1.2e9},
+        metric_name="rmse", direction="minimize", min_delta=0.001, max_regression=0.02)
+    assert decision == "promote", reasons
+    assert any("reported only: nasa_score" in item for item in reasons)
+    # MAE still vetoes
+    decision, _, reasons = compare_metrics(
+        {"rmse": 40.0, "mae": 20.0, "nasa_score": 1.0e9},
+        {"rmse": 38.0, "mae": 21.0, "nasa_score": 9.0e8},
+        metric_name="rmse", direction="minimize", min_delta=0.001, max_regression=0.02)
     assert decision == "rollback"
-    assert any("nasa_score" in item for item in reasons)
 
 
 def test_evaluation_gate_promotes_with_same_validation_bundle(tmp_path):
@@ -273,7 +277,7 @@ def test_detailed_metrics_are_written_without_changing_gate(tmp_path, monkeypatc
 
     detailed = DetailedEvaluator()
 
-    def detail_evaluator(path, received_bundle):
+    def detail_evaluator(path, received_bundle, **kwargs):
         is_candidate = Path(path).read_bytes() == candidate_payload
         score = 0.75 if is_candidate else 0.72
         return (

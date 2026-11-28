@@ -48,6 +48,7 @@ def test_group_audit_reports_worst_bearing():
     assert result["group_count"] == 2
     assert result["worst_group"]["group"] == "b2"
     assert result["worst_group"]["delta"] < 0
+    assert result["worst_absolute_group"]["group"] == "b2"
 
 
 def test_group_audit_skips_when_group_count_exceeds_limit():

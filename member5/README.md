@@ -9,15 +9,22 @@
 - `member5.record:write_round_record()`：每轮生成不可覆盖的本地 JSON 记录，
   默认离线；设置 `SWANLAB_MODE=online` 时尝试上传 SwanLab。
 - `member5.robustness`：按分组确定性拆分验证集，分别比较父模型和候选模型。
-  它只记录稳健性风险，不擅自改变现有 `promote / rollback` 结论。
+  `worst_group` 是最多退化的组（回归审计），`worst_absolute_group` 是候选下
+  绝对指标最差的组（平台 worst 口径）。它只记录稳健性风险，不擅自改变现有
+  `promote / rollback` 结论。
 - `member5.metrics`：生成分类逐类 precision/recall/F1、Macro 指标和混淆矩阵；
-  回归额外记录最差批次 RMSE/MAE。详细指标保存在独立审计文件中，不改变门控。
+  回归额外记录最差批次 RMSE/MAE；C 还按成员4同口径计算 NASA 非对称分数
+  （`exp(-d/13)-1` / `exp(d/10)-1`，指数裁剪到 ±50 后取平均）。NASA 作为
+  辅助指标参与门控，默认相对容差 2%（`gate.max_regression`）；成员4 在逐
+  epoch/跨计划选择时也优先 gate-safe 候选。其余详细指标保存在独立审计文件中。
 - `member5.audit`：检查父/候选哈希、真实调用 ID、指标方向、门控理由和
   自适应候选试验，并生成 Markdown、CSV、JSON 三种验收汇总。
 - `member5.offline_acceptance`：分离断网运行状态和 SwanLab 公开证据，
   无需人工输入即可给出 `pass / fail`。
 - `member5.swanlab_export`：比赛运行结束后，在联网机器上把本地 JSON 单独
-  导出为公开实验，不进入比赛运行流程。
+  导出为公开实验，不进入比赛运行流程。SwanLab config 和 metrics 同时带上
+  成员4的训练诊断：选中的计划、窗口/加权/SWA/anchor、剪枝 `keep`、训练行数、
+  实际 epoch、最差组变化和选择分数。
 - `scripts/run_local_harness_e2e.py`：无网络运行 A/B/C 本地全系统试跑。
   第 1 轮可触发真实成员 4 候选，后续轮次验证 `no_update`。记录标记为
   `local-simulated`，SwanLab 导出器会拒绝发布。

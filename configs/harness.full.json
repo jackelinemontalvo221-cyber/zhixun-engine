@@ -31,7 +31,7 @@
   "budget": {
     "cpu_seconds": 3600,
     "tokens": 120000,
-    "label_quota": 0,
+    "label_quota": null,
     "max_stages": 60,
     "max_candidates_per_stage": 2,
     "max_training_trials_per_stage": 3

@@ -87,11 +87,17 @@ def test_full_b_candidate_continues_parent_architecture(monkeypatch, tmp_path):
     candidate = result["candidate"]
     assert candidate is not None
     selected = candidate.config["selected_plan"]
-    assert "transform" not in selected
+    transform = selected.get("transform") or {}
+    assert transform.get("kind") in (None, "prune_hidden")
     assert selected["name"] in {
         "recent-short",
         "recent-selected",
+        "recent-long",
+        "recent-swa",
+        "pruned-recent",
+        "recent-lr-low",
         "full-short",
+        "full-selected",
         "replay-recent",
     }
     with tempfile.TemporaryDirectory() as directory:
@@ -99,9 +105,13 @@ def test_full_b_candidate_continues_parent_architecture(monkeypatch, tmp_path):
         path.write_bytes(candidate.checkpoint_bytes)
         continued = import_baselines().model.Model.load(path)
     parent = import_baselines().model.Model.load(PACKAGES["B"] / "checkpoint.npz")
-    assert continued.meta["hidden"] == parent.meta["hidden"]
     assert continued.meta["paths"] == parent.meta["paths"]
     assert continued.meta["classes"] == parent.meta["classes"]
-    assert continued.meta["parameter_count"] == parent.meta["parameter_count"]
+    if continued.meta.get("migration"):
+        assert continued.meta["migration"]["kind"] == "hidden_unit_prune"
+        assert continued.meta["hidden"] == continued.meta["migration"]["keep"]
+    else:
+        assert continued.meta["hidden"] == parent.meta["hidden"]
+        assert continued.meta["parameter_count"] == parent.meta["parameter_count"]
     assert continued.meta["steps"] > parent.meta["steps"]
     assert continued.meta["epochs"] > parent.meta["epochs"]

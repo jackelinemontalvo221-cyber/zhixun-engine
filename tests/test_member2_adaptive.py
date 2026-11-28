@@ -49,21 +49,28 @@ def test_notes_carry_seed_new_fraction_and_update_hint(tmp_path):
     ctx.training_policy = {"max_candidates": 3, "max_epochs": 2}
     diag, d = _run(ctx, np.vstack([x_old, x_new]), np.r_[y_old, y_new])
     notes = json.loads(diag.notes)
-    assert notes["v"] == "member2-drift-v3"
+    assert notes["v"] == "member2-drift-v4"
     assert notes["model_seed"] == 1
     assert notes["new_fraction"] == pytest.approx(1 / 3, abs=1e-3)
     assert d.last_report["severity"] == "none"
     assert notes["update_hint"]["action"] == "adaptive_update"
-    # no drop and new rows: use the bounded idle search, not a full drift search
-    assert (notes["update_hint"]["max_candidates"], notes["update_hint"]["max_epochs"]) == (1, 2)
+    # A large new-data batch uses the xhc task portfolio.
+    assert (notes["update_hint"]["max_candidates"], notes["update_hint"]["max_epochs"]) == (3, 2)
     assert len(diag.notes.encode("utf-8")) <= 3900
     # the rule fallback built from these notes is accepted by member 4's seed check
     assert decision_from_diagnosis(diag).params["seed"] == 1
 
 
 def test_update_hint_sizes():
+    first = SimpleNamespace(supported_actions=("no_update", "adaptive_update"),
+                            training_policy={"max_candidates": 2, "max_epochs": 5}, round_log=[])
+    # nothing promoted yet in this run: the first update uses the task's full portfolio
+    assert _update_hint("none", "finetune", first) == {
+        "action": "adaptive_update", "max_candidates": 2, "max_epochs": 5,
+        "why": "first update of the run: full search"}
     ctx = SimpleNamespace(supported_actions=("no_update", "adaptive_update"),
-                          training_policy={"max_candidates": 2, "max_epochs": 5})
+                          training_policy={"max_candidates": 2, "max_epochs": 5},
+                          round_log=[{"final_action": "promote"}])
     assert _update_hint("severe", "retrain_full", ctx)["max_candidates"] == 2
     assert _update_hint("mild", "finetune", ctx)["max_epochs"] == 5
     assert _update_hint("none", "finetune", ctx)["max_epochs"] == 2

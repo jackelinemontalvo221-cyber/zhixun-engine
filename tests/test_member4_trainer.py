@@ -247,7 +247,7 @@ def test_adaptive_update_selects_best_epoch_across_task_portfolio(key, folder):
     assert parent_path.read_bytes() == before_parent_bytes
 
 
-def test_b_adaptive_search_continues_parent_architecture():
+def test_b_adaptive_search_continues_parent_task():
     model, bundle, active, context, _ = load_case(*PACKAGES[1])
     candidate = make_trainer(context).train_candidate(
         bundle,
@@ -261,21 +261,29 @@ def test_b_adaptive_search_continues_parent_architecture():
         budget(),
     )
     assert candidate is not None
-    assert "transform" not in candidate.config["selected_plan"]
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "checkpoint.npz"
         path.write_bytes(candidate.checkpoint_bytes)
         continued = import_baselines().model.Model.load(path)
-    assert continued.meta["hidden"] == model.meta["hidden"]
+    assert continued.meta["task"] == model.meta["task"]
     assert continued.meta["paths"] == model.meta["paths"]
     assert continued.meta["classes"] == model.meta["classes"]
-    assert continued.meta["parameter_count"] == model.meta["parameter_count"]
     assert continued.meta["steps"] > model.meta["steps"]
     assert continued.meta["epochs"] > model.meta["epochs"]
-    assert "migration" not in continued.meta
+    migration = continued.meta.get("migration")
+    if migration:
+        assert migration["kind"] == "hidden_unit_prune"
+        assert migration["parent_hidden"] == model.meta["hidden"]
+        assert continued.meta["hidden"] == migration["keep"]
+    else:
+        assert continued.meta["hidden"] == model.meta["hidden"]
+        assert continued.meta["parameter_count"] == model.meta["parameter_count"]
+    assert continued.meta["parameter_count"] == sum(
+        value.size for value in continued.params.values()
+    )
 
 
-def test_candidate_plans_never_change_architecture():
+def test_candidate_plans_only_allow_recorded_pruning():
     for key in ("A", "B", "C"):
         plans = candidate_plans(
             key,
@@ -284,7 +292,10 @@ def test_candidate_plans_never_change_architecture():
             replay_available=True,
         )
         assert plans
-        assert all("transform" not in plan for plan in plans)
+        for plan in plans:
+            transform = plan.get("transform") or {}
+            assert transform.get("kind") in (None, "prune_hidden")
+            assert "hidden" not in plan and "paths" not in plan and "classes" not in plan
 
 
 def test_architecture_change_is_rejected():
@@ -299,6 +310,46 @@ def test_architecture_change_is_rejected():
     }
     candidate = dict(parent, hidden=8, parameter_count=50)
     with pytest.raises(TrainingError, match="architecture"):
+        _assert_parent_architecture(parent, candidate)
+
+
+def test_recorded_pruning_migration_is_allowed():
+    parent = {
+        "format": "contest.cpu-mlp.v1",
+        "device": "cpu",
+        "task": "regression",
+        "paths": ["a"],
+        "classes": [],
+        "hidden": 24,
+        "parameter_count": 100,
+    }
+    candidate = dict(
+        parent,
+        hidden=8,
+        parameter_count=50,
+        migration={"kind": "hidden_unit_prune", "parent_hidden": 24},
+    )
+    _assert_parent_architecture(parent, candidate)
+
+
+def test_task_identity_cannot_change_even_with_migration():
+    parent = {
+        "format": "contest.cpu-mlp.v1",
+        "device": "cpu",
+        "task": "regression",
+        "paths": ["a"],
+        "classes": [],
+        "hidden": 24,
+        "parameter_count": 100,
+    }
+    candidate = dict(
+        parent,
+        paths=["b"],
+        hidden=8,
+        parameter_count=50,
+        migration={"kind": "hidden_unit_prune", "parent_hidden": 24},
+    )
+    with pytest.raises(TrainingError, match="paths"):
         _assert_parent_architecture(parent, candidate)
 
 
@@ -333,7 +384,7 @@ def test_replay_buffer_persists_and_becomes_a_candidate(tmp_path):
         second_active,
         budget(),
     )
-    assert any(trial["name"] == "replay-input-refit" for trial in second.config["trials"])
+    assert any(trial["name"] == "replay-recent" for trial in second.config["trials"])
     assert second.config["replay_rows_used"] > 0
 
 

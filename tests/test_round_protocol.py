@@ -195,8 +195,8 @@ class ReplyReader:
 
 
 class Host(WorkspaceHost):
-    def __init__(self, start: dict):
-        super().__init__(start)
+    def __init__(self, start: dict, **kwargs):
+        super().__init__(start, **kwargs)
 
     def serve(self, process):
         thread = threading.Thread(target=self._run, args=(process,), daemon=True)

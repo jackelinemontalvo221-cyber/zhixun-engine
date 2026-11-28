@@ -379,8 +379,8 @@ def test_row_state_detects_new_and_changed_rows(tmp_path):
                              targets=np.array([1.0, 0.0]))
     state = RoundState(tmp_path)
     assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [True, True]
-    stored = json.loads((tmp_path / "rows.json").read_text())
-    assert stored["train"]["schema_version"] == "row-bloom-v1" and stored["train"]["count"] == 2
+    with np.load(tmp_path / "rows.npz") as stored:      # xhc's compact exact 64-bit keys
+        assert len(stored["train"]) == 2
     assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [False, False]
     changed = SimpleNamespace(ids=("a", "b"), features=np.array([[1.0, 2.0], [3.0, 5.0]]),
                               targets=np.array([1.0, 0.0]))

@@ -76,8 +76,10 @@ class ModelGateway(Protocol):
 `retrain_recent`、`finetune`、`rollback`。`adaptive_update` 使用
 `max_candidates`、`max_epochs` 和 `seed`，由成员4在当前任务的少量候选计划中
 逐 epoch 选优。候选可以包含数据窗口和历史回放等通用变换；候选必须保持父检查
-点的任务、特征路径、类别顺序和 MLP 宽度。平台要求基于官方 baseline 和父检查
-点续训，不允许提交改变结构的新模型。其余参数由 `contracts.Decision` 严格校验。
+点的任务、特征路径和类别顺序；隐藏层宽度只能通过从父模型迁移保留权重的结构化
+剪枝改变，并在 checkpoint meta 里记录 `migration`。组委会确认：不允许用全套数据
+从头训练另一套模型替代 baseline，续训中的权重随机初始化和结构化剪枝是允许的。
+其余参数由 `contracts.Decision` 严格校验。
 
 `rollback` 的 `params` 必须包含 `target_artifact_id` 或
 `target_checkpoint_sha256` 其中之一。目标必须出现在本轮 `rnd.artifacts`，

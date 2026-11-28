@@ -17,5 +17,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 *:Zone.Identifier
+*：Zone.Identifier
 .vscode/
 .idea/
+zhixun-harness-*.tar

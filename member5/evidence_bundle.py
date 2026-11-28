@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Mapping
 
+from zhixun_harness.fsutil import replace_with_retry
+
 from .audit import build_summary, load_metric_reports, load_round_records, render_markdown
 
 
@@ -35,7 +37,7 @@ def _atomic_write(path: Path, data: dict):
         + "\n",
         encoding="utf-8",
     )
-    temporary.replace(path)
+    replace_with_retry(temporary, path)
 
 
 def write_evidence_bundle(

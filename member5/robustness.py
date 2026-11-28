@@ -174,6 +174,16 @@ def evaluate_group_audit(
 
     scored = [item for item in records if item["delta"] is not None]
     worst = min(scored, key=lambda item: item["delta"]) if scored else None
+    # ``worst_group`` above is the most degraded group (regression audit).  The
+    # platform also scores the worst absolute batch/group, so report that
+    # separately: minimize -> highest candidate value, maximize -> lowest.
+    valued = [item for item in scored if metric_name in item["candidate"]]
+    worst_absolute = None
+    if valued:
+        if direction == "minimize":
+            worst_absolute = max(valued, key=lambda item: item["candidate"][metric_name])
+        else:
+            worst_absolute = min(valued, key=lambda item: item["candidate"][metric_name])
     return {
         "schema_version": GROUP_AUDIT_SCHEMA,
         "status": "robust" if not warnings else "warning",
@@ -183,6 +193,7 @@ def evaluate_group_audit(
         "group_count": len(records),
         "groups": records,
         "worst_group": worst,
+        "worst_absolute_group": worst_absolute,
     }
 
 
@@ -194,6 +205,7 @@ def format_group_summary(result: dict, limit: int = 500) -> str:
         f"groups={result.get('group_count', len(result.get('groups', [])))}; "
         f"worst={worst.get('group', 'n/a')}; "
         f"worst_delta={'n/a' if delta is None else f'{float(delta):+.6f}'}; "
+        f"worst_abs={((result.get('worst_absolute_group') or {}).get('group') or 'n/a')}; "
         f"reason={result.get('reason', '')}"
     )
     return text[:limit]

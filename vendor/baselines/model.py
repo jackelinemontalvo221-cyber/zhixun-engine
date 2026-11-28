@@ -95,12 +95,30 @@ class Model:
         hidden = np.tanh(x @ self.params["w1"] + self.params["b1"])
         return hidden, hidden @ self.params["w2"] + self.params["b2"]
 
-    def fit(self, x, y, epochs):
+    def fit(self, x, y, epochs, sample_weight=None, anchor_params=None, anchor_lambda=0.0):
         if type(epochs) is not int or not 1 <= epochs <= 10000:
             raise ValueError("epochs must be between 1 and 10000")
         x = self.normalized(x)
         if y.shape != (len(x),) or not len(x):
             raise ValueError("target shape mismatch")
+        weights = None
+        if sample_weight is not None:
+            weights = np.asarray(sample_weight, dtype=np.float64)
+            if weights.shape != (len(x),) or not np.all(np.isfinite(weights)) or np.any(weights < 0):
+                raise ValueError("invalid sample weights")
+            if weights.sum() <= 0:
+                raise ValueError("sample weights must have positive mass")
+            weights = weights * (len(weights) / weights.sum())
+        anchor = None
+        if anchor_params is not None:
+            if (isinstance(anchor_lambda, bool) or not isinstance(anchor_lambda, (int, float))
+                    or not math.isfinite(anchor_lambda) or anchor_lambda < 0):
+                raise ValueError("invalid anchor lambda")
+            if set(anchor_params) != set(PARAMETERS):
+                raise ValueError("invalid anchor parameters")
+            anchor = {name: np.asarray(anchor_params[name], dtype=np.float64) for name in PARAMETERS}
+            if any(anchor[name].shape != self.params[name].shape for name in PARAMETERS):
+                raise ValueError("anchor shape mismatch")
         if self.meta["task"] == "regression":
             target = (y - self.meta["target_mean"]) / self.meta["target_scale"]
         else:
@@ -116,19 +134,29 @@ class Model:
             for start in range(0, len(order), self.meta["batch_size"]):
                 indices = order[start:start + self.meta["batch_size"]]
                 batch, expected = x[indices], target[indices]
+                batch_weight = None if weights is None else weights[indices]
+                mass = float(len(indices)) if batch_weight is None else float(batch_weight.sum())
                 hidden, logits = self.forward(batch)
                 if self.meta["task"] == "classification":
                     logits -= logits.max(axis=1, keepdims=True)
                     probabilities = np.exp(logits)
                     probabilities /= probabilities.sum(axis=1, keepdims=True)
-                    loss_sum -= float(np.log(np.maximum(probabilities[np.arange(len(indices)), expected], 1e-300)).sum())
+                    log_probs = np.log(np.maximum(probabilities[np.arange(len(indices)), expected], 1e-300))
+                    loss_sum -= float(np.sum(log_probs if batch_weight is None else log_probs * batch_weight))
                     delta = probabilities
                     delta[np.arange(len(indices)), expected] -= 1
-                    delta /= len(indices)
+                    if batch_weight is None:
+                        delta /= len(indices)
+                    else:
+                        delta *= (batch_weight[:, None] / max(mass, 1e-12))
                 else:
                     error = logits[:, 0] - expected
-                    loss_sum += float(np.sum(error ** 2))
-                    delta = (2 * error / len(indices))[:, None]
+                    if batch_weight is None:
+                        loss_sum += float(np.sum(error ** 2))
+                        delta = (2 * error / len(indices))[:, None]
+                    else:
+                        loss_sum += float(np.sum(error ** 2 * batch_weight))
+                        delta = (2 * error * batch_weight / max(mass, 1e-12))[:, None]
                 gradients = {"w2": hidden.T @ delta, "b2": delta.sum(axis=0)}
                 hidden_delta = (delta @ self.params["w2"].T) * (1 - hidden ** 2)
                 gradients.update(w1=batch.T @ hidden_delta, b1=hidden_delta.sum(axis=0))
@@ -137,6 +165,8 @@ class Model:
                     raise ValueError("nonfinite gradient")
                 self.meta["steps"] += 1
                 for name, gradient in gradients.items():
+                    if anchor is not None and anchor_lambda > 0:
+                        gradient = gradient + anchor_lambda * (self.params[name] - anchor[name])
                     gradient *= min(1.0, 5.0 / max(norm, 1e-12))
                     self.first[name] = .9 * self.first[name] + .1 * gradient
                     self.second[name] = .999 * self.second[name] + .001 * gradient ** 2

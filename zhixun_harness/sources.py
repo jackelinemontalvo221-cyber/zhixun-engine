@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Protocol
 
@@ -272,6 +273,31 @@ class WorkspaceV2Source:
             return None
         return current
 
+    def _group_from_id(self, sample_id: str) -> str:
+        """Recover provenance from the public sample id when ``meta`` is absent.
+
+        The platform projection only guarantees ``id`` / ``inputs`` / ``answer``.
+        The reference packages encode the group in the id (XJTU bearing, C-MAPSS
+        unit, UCI source batch), so a conservative id parser keeps group-disjoint
+        validation and the worst-group audit available on platform-shaped rows.
+        Unknown ids stay singleton groups.
+        """
+
+        key = str(getattr(self.rnd, "dataset_key", ""))
+        if key == "B":
+            match = re.search(r"(Bearing\d+_\d+)", sample_id, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        elif key == "C":
+            match = re.search(r"(fd\d+).*?(u\d+)", sample_id, re.IGNORECASE)
+            if match:
+                return f"{match.group(1).lower()}|{match.group(2).lower()}"
+        elif key == "A":
+            match = re.search(r"(?:^|_)(b\d+)(?:_|$)", sample_id, re.IGNORECASE)
+            if match:
+                return match.group(1).lower()
+        return sample_id
+
     def _group_for_row(self, row: Mapping) -> str:
         fields = self._group_fields
         if tuple(fields) == ("id",):
@@ -281,10 +307,11 @@ class WorkspaceV2Source:
             value = self._lookup_field(row, field)
             if value is None:
                 # A missing provenance field must not merge unrelated rows.
-                # Falling back to the row id keeps the round runnable.
-                return str(row["id"])
+                # Recover it from the public id when possible, otherwise keep
+                # the row as a singleton group.
+                return self._group_from_id(str(row["id"]))
             parts.append(str(value))
-        return "|".join(parts) or str(row["id"])
+        return "|".join(parts) or self._group_from_id(str(row["id"]))
 
     def next(self) -> StageDescriptor | None:
         if self._used:

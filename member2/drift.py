@@ -33,11 +33,11 @@ import numpy as np
 
 from zhixun_harness.contracts import Diagnosis
 from ._compat import import_baselines
-from member4.strategy import exploration_due
+from member4.strategy import probe_status, stable_round_streak
 
 from . import signals as sig
 
-VERSION = "member2-drift-v3"
+VERSION = "member2-drift-v4"
 MAX_ROWS = 50_000          # per side for distribution tests (C has 113k training rows)
 HISTORY_KEEP = 30
 UNLIMITED = 1e15           # Diagnosis.budget_remaining must be numbers; None limit -> this
@@ -220,17 +220,39 @@ class DriftDiagnoser:
         # --- 3. budget and recommendation ----------------------------------------------------
         remaining = {k: (UNLIMITED if v is None else float(v)) for k, v in budget.remaining().items()}
         exhausted = budget.exhausted() if hasattr(budget, "exhausted") else []
+        label_limit = (getattr(budget, "limits", {}) or {}).get("label_quota")
+        if label_limit == 0:
+            # A zero label quota is a config sentinel, not a resource warning.
+            exhausted = [item for item in exhausted if item != "label_quota"]
         cpu_limit = (getattr(budget, "limits", {}) or {}).get("cpu_seconds")
         cpu_share_left = None if not cpu_limit else remaining["cpu_seconds"] / cpu_limit
         no_new_rows = mask is not None and len(mask) == len(x) and not mask.any()
+        new_fraction = (
+            float(mask.mean())
+            if mask is not None and len(mask) == len(x) and len(mask)
+            else None
+        )
         strategy_policy = getattr(ctx, "training_policy", {}) or {}
-        probe_due = exploration_due(
+        probe = dict(probe_status(
             strategy_policy,
             getattr(ctx, "round_log", []) or [],
             cpu_share_left=cpu_share_left,
-        )
+        ))
+        historical_probe_due = probe["due"]
+        stable_round = severity == "none" and no_new_rows
+        if historical_probe_due and not stable_round:
+            probe.update(
+                due=False,
+                eligible=False,
+                reason="current degradation or new training data takes priority",
+                suppressed_by_current_round=True,
+            )
+        else:
+            probe["suppressed_by_current_round"] = False
+        probe_due = probe["due"]
         recommendation, epochs, why = self._recommend(severity, cov, exhausted, ref_source, cpu_share_left,
-                                                      no_new_rows=no_new_rows, probe_due=probe_due)
+                                                      no_new_rows=no_new_rows, new_fraction=new_fraction, probe_due=probe_due,
+                                                      probe_reason=probe["reason"])
         rollback_hint = self._rollback_hint(metric, task, model, current, x_val, y_val, n_classes)
         if rollback_hint is not None:
             # Measured on the UCI / C-MAPSS streams: replacing training by a rollback lost
@@ -255,15 +277,21 @@ class DriftDiagnoser:
             "reference": _r(reference), "reference_src": ref_source, "perf_drop": _r(drop),
             "new_rows_score": _r(new_rows_score), "new_rows_drop": _r(drop_new),
             "severity": severity, "split": split,
-            "rows": {"total": int(len(x)), "new": int(len(x_new)) if x_new is not None else 0},
+            "rows": {
+                "total": int(len(x)),
+                "new": int(mask.sum()) if mask is not None and len(mask) == len(x) else 0,
+                "new_known": bool(mask is not None and len(mask) == len(x)),
+                "validation": int(len(x_val)) if x_val is not None else 0,
+            },
             "signals": {k: (_r(v) if isinstance(v, float) else v) for k, v in cov.items()},
             "top_features": top, "rule": why, "epochs_hint": epochs,
             "model_seed": _model_seed(model),
-            "new_fraction": (_r(float(mask.mean())) if split == "old_vs_new_train"
-                             else 0.0 if no_new_rows else None),
+            "new_fraction": _r(new_fraction) if new_fraction is not None else None,
+            "probe_status": probe,
             "probe_due": probe_due,
-            "stable_rounds": strategy_policy.get("stable_rounds", 0),
-            "update_hint": _update_hint(severity, recommendation, ctx, cpu_share_left, probe=probe_due),
+            "stable_rounds": probe["stable_rounds"],
+            "update_hint": _update_hint(severity, recommendation, ctx, cpu_share_left, probe=probe_due,
+                                        new_fraction=new_fraction),
             "baseline_round": baseline_round,
             "rollback_hint": rollback_hint,
             "attribution": _attribution(metric, current, reference, ref_source, drop, baseline_round, cov,
@@ -337,14 +365,17 @@ class DriftDiagnoser:
 
     @staticmethod
     def _recommend(severity, cov, exhausted, ref_source, cpu_share_left=None, no_new_rows=False,
-                   probe_due=False):
+                   probe_due=False, probe_reason="probe not due", new_fraction=None):
         if "cpu_seconds" in exhausted:
             return "no_update", 0, "CPU 预算已用完，保持当前模型"
         if severity == "none" and no_new_rows:
             if probe_due:
-                return "finetune", 1, "稳定冠军连续多轮未更新；执行一次受预算限制的低成本探测"
+                return "finetune", 1, "没有新增训练数据且成绩未降；稳定探测到期，在预算内执行1候选1epoch探测，由验证门控决定是否上线"
             # nothing new to learn: retraining on the same rows only re-rolls validation noise
-            return "no_update", 0, "本轮没有新的训练数据，成绩也没有下降，不训练"
+            return "no_update", 0, f"本轮没有新的训练数据且成绩未降；暂不探测（{probe_reason}）"
+        if (severity == "none" and new_fraction is not None
+                and 0.0 < new_fraction < SMALL_NEW_FRACTION):
+            return "no_update", 0, "本轮新增训练数据很少（<0.5%），成绩没有下降，不训练"
         if severity == "severe":
             return "retrain_full", EPOCHS_HINT["severe"], "成绩明显下降（超过严重阈值），用全部数据续训"
         if severity == "mild":
@@ -355,6 +386,9 @@ class DriftDiagnoser:
             return "finetune", EPOCHS_HINT["light"], "出现训练时没见过的运行工况，轻量续训"
         if severity == "unknown":
             return "investigate", 0, "没有参考成绩，也无法加载模型，无法判断"
+        if (severity == "none" and new_fraction is not None
+                and new_fraction < FULL_SEARCH_FRACTION):
+            return "finetune", EPOCHS_HINT["light"], "本轮有少量新数据，轻量续训（1候选×1epoch/回放，由验证门控把关）"
         if IDLE_LIGHT_UPDATE and (cpu_share_left is None or cpu_share_left > IDLE_MIN_CPU_SHARE):
             return "finetune", EPOCHS_HINT["light"], "成绩未降，CPU 预算充足，轻量续训（由验证门控把关）"
         return "no_update", 0, "成绩没有明显下降，保持当前模型以节省算力"
@@ -547,9 +581,18 @@ def _model_seed(model):
 
 
 LIGHT_SEARCH = {"max_candidates": 1, "max_epochs": 1}
+# Below 0.5% new training rows retraining only re-rolls validation noise; between
+# 0.5% and 5% use one cheap parent-anchored candidate; the full portfolio stays
+# for a measurable drop or a larger new batch.
+SMALL_NEW_FRACTION = 0.005
+FULL_SEARCH_FRACTION = 0.05
 
 
-def _update_hint(severity, recommendation, ctx, cpu_share_left=None, probe=False):
+def _stable_streak(round_log) -> int:
+    return stable_round_streak(round_log)
+
+
+def _update_hint(severity, recommendation, ctx, cpu_share_left=None, probe=False, new_fraction=None):
     """How big member 4's adaptive search should be this round (a hint for member 3 / Qwen).
 
     Measured with ``member2.compare`` (A and C, 3 seeds): degraded rounds need the full task
@@ -564,6 +607,10 @@ def _update_hint(severity, recommendation, ctx, cpu_share_left=None, probe=False
     if recommendation == "rollback":
         return {"action": "no_update", "why": "not training this round; an earlier active model is better: rollback"}
     policy = getattr(ctx, "training_policy", {}) or {}
+    if severity in ("mild", "severe"):
+        size = {"max_candidates": int(policy.get("max_candidates", 2)),
+                "max_epochs": int(policy.get("max_epochs", 3))}
+        return {"action": "adaptive_update", **size, "why": "measurable drop: full search"}
     if probe:
         size = {
             "max_candidates": int(policy.get("probe_max_candidates", 1)),
@@ -574,17 +621,35 @@ def _update_hint(severity, recommendation, ctx, cpu_share_left=None, probe=False
             **size,
             "why": "stable champion: bounded periodic champion/challenger probe",
         }
-    if severity in ("mild", "severe"):
-        size = {"max_candidates": int(policy.get("max_candidates", 2)),
-                "max_epochs": int(policy.get("max_epochs", 3))}
-        return {"action": "adaptive_update", **size, "why": "measurable drop: full search"}
     if severity == "none" and recommendation in ("finetune", "retrain_full", "retrain_recent"):
+        log = list(getattr(ctx, "round_log", []) or [])
+        if not any(isinstance(item, dict) and item.get("final_action") == "promote" for item in log):
+            # Platform trials 0.2.4 / 0.2.6: B/C training rows hardly change between rounds,
+            # so the first update is the one that can use the whole training projection, yet
+            # the idle hint capped C at 1 candidate x 2 epochs and C's hidden RMSE stayed at
+            # (0.2.4: 56.22) or behind (0.2.6: 56.59) the static baseline's 56.23.  Until
+            # something has been promoted, the task's full portfolio runs.
+            size = {"max_candidates": int(policy.get("max_candidates", 2)),
+                    "max_epochs": int(policy.get("max_epochs", 3))}
+            return {"action": "adaptive_update", **size, "why": "first update of the run: full search"}
+        if new_fraction is not None and new_fraction < FULL_SEARCH_FRACTION:
+            return {"action": "adaptive_update", **LIGHT_SEARCH,
+                    "why": "small new data: 1 candidate x 1 epoch (+replay/anchor), gate decides"}
+        if new_fraction is not None and new_fraction >= FULL_SEARCH_FRACTION and (cpu_share_left is None or cpu_share_left > IDLE_MIN_CPU_SHARE):
+            return {"action": "adaptive_update", "max_candidates": int(policy.get("max_candidates", 2)),
+                    "max_epochs": int(policy.get("max_epochs", 3)), "why": "new training data: full search"}
         if IDLE_FULL_SEARCH and (cpu_share_left is None or cpu_share_left > IDLE_MIN_CPU_SHARE):
-            size = {
-                "max_candidates": int(policy.get("idle_max_candidates", 1)),
-                "max_epochs": int(policy.get("idle_max_epochs", 2)),
-            }
-            return {"action": "adaptive_update", **size, "why": "no drop, CPU plentiful: bounded idle search"}
+            if new_fraction is None:
+                size = {
+                    "max_candidates": int(policy.get("idle_max_candidates", 1)),
+                    "max_epochs": int(policy.get("idle_max_epochs", 2)),
+                }
+            else:
+                size = {
+                    "max_candidates": int(policy.get("max_candidates", 2)),
+                    "max_epochs": int(policy.get("max_epochs", 3)),
+                }
+            return {"action": "adaptive_update", **size, "why": "new data: budgeted task search"}
         return {
             "action": "adaptive_update",
             **LIGHT_SEARCH,

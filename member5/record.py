@@ -14,6 +14,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from zhixun_harness.fsutil import replace_with_retry
+
 from .audit import acceptance_packet
 
 
@@ -50,7 +52,7 @@ def _atomic_write(path: Path, data: dict):
         json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )
-    temporary.replace(path)
+    replace_with_retry(temporary, path)
 
 
 _NO_COMMIT = {"unknown", "none", "null", "-"}

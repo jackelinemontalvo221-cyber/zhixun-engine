@@ -258,21 +258,33 @@ def test_state_tracks_changes_separately_and_restarts(tmp_path):
     assert result["validation"].new_mask.tolist() == [True, True]
 
 
-def test_rows_state_is_bounded_bloom_and_detects_new_rows(tmp_path):
+def test_row_state_is_compact_and_migrates_legacy_json(tmp_path):
     state = RoundState(tmp_path)
+    count = 5000
     bundle = SimpleNamespace(
-        ids=("a", "b"),
-        features=np.array([[1.0], [2.0]]),
-        targets=np.array([0.0, 1.0]),
+        ids=tuple(f"id{index}" for index in range(count)),
+        features=np.arange(count, dtype=float).reshape(-1, 1),
+        targets=np.zeros(count, dtype=np.int64),
     )
-    first = track_rows(state, {"train": bundle})["train"]
-    second = track_rows(state, {"train": bundle})["train"]
-    assert first.new_mask.tolist() == [True, True]
-    assert second.new_mask.tolist() == [False, False]
-    payload = json.loads((tmp_path / "rows.json").read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "row-bloom-v1"
-    assert len(payload["train"]["bits"]) > 0
-    assert (tmp_path / "rows.json").stat().st_size < 6 * 1024 * 1024
+    first = track_rows(state, {"train": bundle})
+    assert first["train"].new_mask.all()
+    assert (tmp_path / "rows.npz").is_file()
+    assert not (tmp_path / "rows.json").exists()
+    assert (tmp_path / "rows.npz").stat().st_size < count * 16
+
+    # Re-open: everything is already seen.
+    assert not track_rows(state, {"train": bundle})["train"].new_mask.any()
+
+    # Simulate a legacy rows.json and verify the migration keeps identities.
+    with np.load(tmp_path / "rows.npz") as data:
+        train = data["train"]
+    legacy = {"train": [f"{int(value):016x}" for value in train]}
+    (tmp_path / "rows.json").write_text(json.dumps(legacy), encoding="utf-8")
+    (tmp_path / "rows.npz").unlink()
+    migrated = track_rows(state, {"train": bundle})
+    assert not migrated["train"].new_mask.any()
+    assert (tmp_path / "rows.npz").is_file()
+    assert not (tmp_path / "rows.json").exists()
 
 
 def test_configs_and_missing_trainer_are_explicit():
@@ -285,3 +297,47 @@ def test_configs_and_missing_trainer_are_explicit():
         pipeline.train_candidate(None, None, None, None)
     with pytest.raises(ConfigError):
         build_evaluator(HarnessConfig(pipeline={"diagnose": "member2.drift:DriftDiagnoser", "decide": "member3.decider:LLMDecider"}))
+
+
+def test_compact_rows_preserve_member5_legacy_bloom_membership(tmp_path):
+    import base64
+    from zhixun_harness.round_state import _row_digest
+
+    state = RoundState(tmp_path)
+    bundle = SimpleNamespace(
+        ids=["old", "new"],
+        features=np.asarray([[1.0], [2.0]]),
+        targets=np.asarray([0, 1]),
+    )
+    digest = _row_digest(bundle, 0)
+    bits = bytearray(1 << 21)
+    for offset in range(0, 32, 8):
+        position = int.from_bytes(digest[offset:offset + 8], "big") % (1 << 24)
+        bits[position >> 3] |= 1 << (position & 7)
+    state.write("rows.json", {
+        "schema_version": "row-bloom-v1",
+        "train": {
+            "schema_version": "row-bloom-v1",
+            "bits": base64.b64encode(bits).decode("ascii"),
+            "count": 1,
+        },
+    })
+    first = track_rows(state, {"train": bundle})
+    assert first["train"].new_mask.tolist() == [False, True]
+    assert (tmp_path / "rows.npz").is_file()
+    assert (tmp_path / "rows-bloom.json").is_file()
+    assert not (tmp_path / "rows.json").exists()
+    assert not track_rows(state, {"train": bundle})["train"].new_mask.any()
+    bundle.targets[0] = 1
+    assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [True, False]
+
+
+def test_compact_rows_count_repeated_samples_once(tmp_path):
+    state = RoundState(tmp_path)
+    bundle = SimpleNamespace(
+        ids=["same", "same"],
+        features=np.asarray([[1.0], [1.0]]),
+        targets=np.asarray([0, 0]),
+    )
+    assert track_rows(state, {"train": bundle})["train"].new_mask.tolist() == [True, False]
+    assert not track_rows(state, {"train": bundle})["train"].new_mask.any()

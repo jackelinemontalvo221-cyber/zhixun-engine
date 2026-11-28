@@ -117,6 +117,36 @@ def test_label_change_is_severe_concept_or_mixed(tmp_path):
     assert diag.baseline_metrics and "macro_f1" in diag.baseline_metrics
 
 
+def test_current_degradation_overrides_historical_probe(tmp_path):
+    rng = np.random.default_rng(16)
+    x_old, y_old = _data(600, rng)
+    x_new, y_new = _data(300, rng, flip=0.8)
+    val = _data(300, rng, flip=0.8)
+    ckpt = _model(tmp_path, x_old, y_old)
+    ctx = _context(tmp_path, checkpoint=ckpt, x_old=x_old, x_new=x_new, val=val)
+    ctx.round_log = [
+        {"action": "no_update", "final_action": "no_update"},
+        {"action": "no_update", "final_action": "no_update"},
+        {"action": "no_update", "final_action": "no_update"},
+    ]
+    ctx.training_policy = {
+        "probe_interval": 4,
+        "probe_min_cpu_share": 0.25,
+        "probe_max_candidates": 1,
+        "probe_max_epochs": 1,
+        "max_candidates": 2,
+        "max_epochs": 5,
+    }
+    ctx.supported_actions = ("no_update", "adaptive_update")
+    _, diagnoser = _run(ctx, np.vstack([x_old, x_new]), np.r_[y_old, y_new])
+    report = diagnoser.last_report
+    assert report["severity"] == "severe"
+    assert report["probe_due"] is False
+    assert report["probe_status"]["suppressed_by_current_round"] is True
+    assert report["update_hint"]["max_candidates"] == 2
+    assert report["update_hint"]["max_epochs"] == 5
+
+
 def test_input_shift_without_harm_is_covariate_only(tmp_path):
     rng = np.random.default_rng(2)
     x_old, y_old = _data(600, rng)
@@ -168,6 +198,17 @@ def test_budget_is_reported_and_respected(tmp_path):
     assert diag.recommendation == "no_update"             # severe, but CPU is used up
     assert diag.budget_remaining["cpu_seconds"] == 0 and diag.budget_remaining["tokens"] == UNLIMITED
 
+
+def test_rows_report_separates_new_training_rows_from_validation_rows(tmp_path):
+    rng = np.random.default_rng(15)
+    x_old, y_old = _data(400, rng)
+    ckpt = _model(tmp_path, x_old, y_old)
+    ctx = _context(tmp_path, checkpoint=ckpt, x_old=x_old, x_new=np.empty((0, x_old.shape[1])),
+                   val=_data(125, rng))
+    _, diagnoser = _run(ctx, x_old, y_old)
+    rows = diagnoser.last_report["rows"]
+    assert diagnoser.last_report["split"] == "train_vs_validation"
+    assert rows == {"total": 400, "new": 0, "new_known": True, "validation": 125}
 
 def test_history_and_first_seen_reference_persist(tmp_path):
     rng = np.random.default_rng(6)

@@ -17,6 +17,7 @@ from .contracts import (
     now_utc,
 )
 from .errors import ConfigError, FatalContractError
+from .fsutil import replace_with_retry
 from .hashing import file_sha256, sha256_bytes
 
 MANIFEST_SCHEMA = "committed-stage.v1"
@@ -45,7 +46,7 @@ def _write_new(path: Path, data: bytes):
 def _write_atomic(path: Path, data: bytes):
     tmp = path.with_name(path.name + f".tmp-{uuid.uuid4()}")
     _write_new(tmp, data)
-    os.replace(tmp, path)
+    replace_with_retry(tmp, path)
     _fsync_dir(path.parent)
 
 
@@ -125,7 +126,7 @@ class StageTxn:
             shutil.rmtree(self.tmp, ignore_errors=True)
             self._closed = True
             return "reused"
-        os.replace(self.tmp, self.final)
+        replace_with_retry(self.tmp, self.final)
         _fsync_dir(self.store.run_dir)
         self._closed = True
         return "committed"
